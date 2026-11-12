@@ -1,0 +1,140 @@
+# ═══════════════════════════════════════════════════════════════════════
+# OwnPBX texting for the ESP32-S3-Box-3 (extension 1002) — Home Assistant package
+# Filled in for YOUR-PBX-HOST (plugin "Home Assistant texts", OwnPBX 1.75.13+).
+# Install: save as /config/packages/ha_pbx_messages.yaml  (underscores, not dashes!)
+# and make sure configuration.yaml has
+#   homeassistant:
+#     packages: !include_dir_named packages
+# then restart Home Assistant. Keep this file private: it holds the token.
+# PBX texting for the ESP32-S3-Box ("Messages" app) — Home Assistant package
+# ───────────────────────────────────────────────────────────────────────
+# Install: drop this file in /config/packages/  (requires
+#   homeassistant:
+#     packages: !include_dir_named packages
+# in configuration.yaml), then restart Home Assistant.
+# The PBX token and the box's extension (1002) are baked into this file
+# below — no secrets.yaml entries needed.
+#
+# The automation finds the box's Inbox Line 1..5 entities by name (text.*_inbox_line_N),
+# so it works whatever Home Assistant named the ESPHome device.
+# ═══════════════════════════════════════════════════════════════════════
+
+rest_command:
+  pbx_send_text:
+    url: "https://YOUR-PBX-HOST/api/plugins/ha-texts/messages/send"
+    method: post
+    headers:
+      Content-Type: "application/json"
+      X-Msg-Token: "PASTE_TOKEN_FROM_PLUGIN_PAGE"
+    payload: '{"to":"{{ to_ext }}","from":"{{ from_ext }}","body":{{ body | tojson }},"store":true}'
+    content_type: "application/json; charset=utf-8"
+    verify_ssl: false
+
+script:
+  esp_send_text:
+    alias: "ESP: send PBX text"
+    description: >-
+      Send a text via OwnPBX. Called from the ESP32-S3-Box Messages screen
+      and from its "Send Text Message" button in HA. OwnPBX sends it through Chat
+      (to an extension) or as SMS (to a phone number).
+    fields:
+      to_ext:
+        description: "Destination extension"
+        required: true
+        example: "8801"
+      body:
+        description: "Message text"
+        required: true
+    sequence:
+      - service: rest_command.pbx_send_text
+        data:
+          to_ext: "{{ to_ext }}"
+          from_ext: "1002"
+          body: "{{ body }}"
+        response_variable: pbx_resp
+      - if: "{{ pbx_resp.get('content', {}).get('ok') != true }}"
+        then:
+          - service: persistent_notification.create
+            data:
+              title: "PBX text not sent"
+              message: >-
+                To {{ to_ext }}: {{ pbx_resp.get('content', {}).get('error', 'unknown error') }}
+
+  esp_messages_seen:
+    alias: "ESP: mark PBX texts seen"
+    description: "Called when the Messages page is opened on the box; clears the unread badge."
+    sequence:
+      - service: input_number.set_value
+        target:
+          entity_id: input_number.pbx_last_seen
+        data:
+          value: "{{ states('sensor.pbx_inbox') | int(0) }}"
+      - service: input_number.set_value
+        target:
+          entity_id: input_number.pbx_unread
+        data:
+          value: 0
+
+sensor:
+  # Polls OwnPBX for the ESP extension's texts every 15s. The state is the
+  # newest message id; the message list rides along as an attribute.
+  - platform: rest
+    name: "PBX Inbox"
+    unique_id: pbx_inbox_esp
+    resource: "https://YOUR-PBX-HOST/api/plugins/ha-texts/messages/inbox?ext=1002&limit=20"
+    headers:
+      X-Msg-Token: "PASTE_TOKEN_FROM_PLUGIN_PAGE"
+    value_template: "{{ value_json.latest_id | int(0) }}"
+    json_attributes:
+      - messages
+    scan_interval: 15
+
+input_number:
+  pbx_last_seen:
+    name: "PBX Last Seen Message"
+    min: 0
+    max: 999999999
+    step: 1
+    mode: box
+    icon: mdi:eye-check
+  pbx_unread:
+    name: "PBX Unread Texts"
+    min: 0
+    max: 999
+    step: 1
+    mode: box
+    icon: mdi:message-badge
+
+automation:
+  - alias: "PBX inbox -> ESP screen"
+    description: "Mirror the 5 newest texts onto the ESP32-S3-Box Messages page and update the unread count."
+    trigger:
+      - platform: state
+        entity_id: sensor.pbx_inbox
+    variables:
+      msgs: "{{ state_attr('sensor.pbx_inbox', 'messages') or [] }}"
+    condition: "{{ msgs | length > 0 }}"
+    action:
+      - repeat:
+          count: 5
+          sequence:
+            - variables:
+                m: "{{ msgs[-repeat.index] if msgs | length >= repeat.index else none }}"
+            - service: text.set_value
+              continue_on_error: true
+              target:
+                # Found by name, whatever Home Assistant called the box: text.<anything>_inbox_line_N
+                entity_id: >-
+                  {{ states.text | map(attribute='entity_id')
+                     | select('match', '^text\\..*inbox_line_' ~ repeat.index ~ '$')
+                     | first | default('text.esp32_s3_box_3_inbox_line_' ~ repeat.index) }}
+              data:
+                value: >-
+                  {% if m is not none -%}
+                  {{ ('To ' ~ m.to ~ ': ') if m.dir == 'out' else (m['from'] ~ ': ') }}{{ m.body | truncate(120, true, '…') }}
+                  {%- endif %}
+      - service: input_number.set_value
+        target:
+          entity_id: input_number.pbx_unread
+        data:
+          value: "{{ msgs | selectattr('id', 'gt', states('input_number.pbx_last_seen') | int(0)) | list | length }}"

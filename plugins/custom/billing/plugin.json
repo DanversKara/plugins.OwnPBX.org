@@ -1,0 +1,139 @@
+{
+    "slug": "billing",
+    "name": "Billing & Store (Stripe)",
+    "name_i18n": {
+        "en": "Billing & Store (Stripe)",
+        "tr": "Faturalama ve Mağaza (Stripe)"
+    },
+    "version": "1.0.1",
+    "requires_aipbx": "1.74.0",
+    "author": "OwnPBX",
+    "author_url": "https://github.com/DanversKara/OwnPBX.org/tree/main/plugins/billing",
+    "type": "official",
+    "category": "integration",
+    "icon": "fas fa-credit-card",
+    "icon_style": "color: #635bff;",
+    "description": "Monthly plans through Stripe that set what each user gets: outside call minutes, text messages and fax. Users subscribe, switch and cancel themselves; a public Store takes sign-ups that wait for your approval before anyone is charged. Limits can be watched before they are enforced.",
+    "description_i18n": {
+        "en": "Monthly plans through Stripe that set what each user gets: outside call minutes, text messages and fax. Users subscribe, switch and cancel themselves; a public Store takes sign-ups that wait for your approval before anyone is charged. Limits can be watched before they are enforced."
+    },
+    "tables": [
+        "plg_billing_plans",
+        "plg_billing_customers",
+        "plg_billing_events",
+        "plg_billing_usage",
+        "plg_billing_overrides",
+        "plg_billing_orders",
+        "plg_billing_store_numbers"
+    ],
+    "scopes": [],
+    "hooks": {
+        "public_endpoints": true,
+        "admin_page": {
+            "group": "integrations"
+        },
+        "user_page": {
+            "label": "Billing",
+            "label_i18n": {
+                "en": "Billing",
+                "tr": "Faturalama"
+            },
+            "icon": "fas fa-credit-card"
+        }
+    },
+    "settings_schema": [
+        {
+            "key": "enforce",
+            "type": "boolean",
+            "default": "0",
+            "label": "Enforce limits",
+            "help": "On: users are stopped at their plan's limits. Off: usage is only counted and shown."
+        },
+        {
+            "key": "stripe_secret_key",
+            "type": "password",
+            "default": "",
+            "secret": true,
+            "label": "Stripe secret key",
+            "help": "sk_test_… while testing, sk_live_… for real payments."
+        },
+        {
+            "key": "stripe_webhook_secret",
+            "type": "password",
+            "default": "",
+            "secret": true,
+            "label": "Stripe webhook signing secret",
+            "help": "whsec_… from the webhook endpoint you add in Stripe."
+        },
+        {
+            "key": "currency",
+            "type": "text",
+            "default": "usd",
+            "label": "Currency",
+            "help": "ISO code, e.g. usd, eur, gbp."
+        },
+        {
+            "key": "default_call_minutes",
+            "type": "number",
+            "default": "-1",
+            "label": "No plan: outside call minutes",
+            "help": "Per month for users without a plan. -1 = unlimited, 0 = none."
+        },
+        {
+            "key": "default_messages",
+            "type": "number",
+            "default": "-1",
+            "label": "No plan: text messages",
+            "help": "Per month for users without a plan. -1 = unlimited, 0 = none."
+        },
+        {
+            "key": "default_fax",
+            "type": "boolean",
+            "default": "1",
+            "label": "No plan: fax",
+            "help": "Users without a plan may send faxes."
+        },
+        {
+            "key": "default_faxes",
+            "type": "number",
+            "default": "-1",
+            "label": "No plan: faxes sent",
+            "help": "Per month for users without a plan. -1 = unlimited, 0 = none."
+        },
+        {
+            "key": "store_enabled",
+            "type": "boolean",
+            "default": "0",
+            "label": "Public Store",
+            "help": "Open the Store. Sign-ups wait for your approval; nobody is charged before it."
+        },
+        {
+            "key": "store_ext_from",
+            "type": "number",
+            "default": "2000",
+            "label": "Store: first extension",
+            "help": "First extension number given to approved customers."
+        },
+        {
+            "key": "store_ext_to",
+            "type": "number",
+            "default": "2999",
+            "label": "Store: last extension",
+            "help": "Last extension number given to approved customers."
+        },
+        {
+            "key": "store_notify_email",
+            "type": "text",
+            "default": "",
+            "label": "Store: e-mail new orders to",
+            "help": "Leave empty for no e-mail."
+        },
+        {
+            "key": "store_terms_url",
+            "type": "text",
+            "default": "",
+            "label": "Store: terms of service link",
+            "help": "Shown on the order form."
+        }
+    ]
+}

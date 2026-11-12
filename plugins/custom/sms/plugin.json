@@ -1,0 +1,195 @@
+{
+    "slug": "sms",
+    "name": "SMS / MMS",
+    "name_i18n": {
+        "en": "SMS / MMS",
+        "tr": "SMS / MMS"
+    },
+    "version": "1.3.0",
+    "requires_aipbx": "1.71.0",
+    "author": "OwnPBX",
+    "author_url": "https://github.com/DanversKara/OwnPBX.org/tree/main/plugins/sms",
+    "type": "official",
+    "category": "integration",
+    "icon": "fas fa-comment-sms",
+    "icon_style": "color: #22c55e;",
+    "description": "Text messages on your numbers through Twilio, Vonage, Plivo, Telnyx, Bandwidth, Sinch, VoIP.ms or BulkVS. The users a number is given to read and answer them. Needs OwnPBX 1.71 or newer.",
+    "description_i18n": {
+        "en": "Text messages on your numbers through Twilio, Vonage, Plivo, Telnyx, Bandwidth, Sinch, VoIP.ms or BulkVS. The users a number is given to read and answer them. Needs OwnPBX 1.71 or newer.",
+        "tr": "Numaralarınıza gelen ve giden kısa mesajlar: Twilio, Vonage, Plivo, Telnyx, Bandwidth, Sinch, VoIP.ms veya BulkVS. Numaranın verildiği kullanıcılar okur ve yanıtlar. OwnPBX 1.71 veya üstü gerekir."
+    },
+    "tables": [
+        "plg_sms_numbers",
+        "plg_sms_access",
+        "plg_sms_messages",
+        "plg_sms_media",
+        "plg_sms_contacts",
+        "plg_sms_replies"
+    ],
+    "scopes": [],
+    "hooks": {
+        "public_endpoints": true,
+        "admin_page": {
+            "group": "integrations"
+        },
+        "user_page": {
+            "label": "Messages",
+            "label_i18n": {
+                "en": "Messages",
+                "tr": "Mesajlar"
+            },
+            "icon": "fas fa-comment-sms"
+        }
+    },
+    "settings_schema": [
+        {
+            "key": "email_notify",
+            "type": "boolean",
+            "default": "1",
+            "label": "E-mail a number's users when a message arrives (at most one mail per conversation in 10 minutes)"
+        },
+        {
+            "key": "giphy_api_key",
+            "type": "password",
+            "default": "",
+            "secret": true,
+            "label": "GIPHY API key (optional): turns on GIF search in Messages and the app. Without it, the GIF button picks a GIF file instead."
+        },
+        {
+            "key": "twilio_account_sid",
+            "type": "text",
+            "default": "",
+            "label": "Twilio: Account SID"
+        },
+        {
+            "key": "twilio_auth_token",
+            "type": "password",
+            "default": "",
+            "label": "Twilio: Auth Token (also checks Twilio's signature)",
+            "secret": true
+        },
+        {
+            "key": "vonage_api_key",
+            "type": "text",
+            "default": "",
+            "label": "Vonage: API key"
+        },
+        {
+            "key": "vonage_api_secret",
+            "type": "password",
+            "default": "",
+            "label": "Vonage: API secret",
+            "secret": true
+        },
+        {
+            "key": "vonage_signature_secret",
+            "type": "password",
+            "default": "",
+            "label": "Vonage: signature secret (checks signed webhooks)",
+            "secret": true
+        },
+        {
+            "key": "plivo_auth_id",
+            "type": "text",
+            "default": "",
+            "label": "Plivo: Auth ID"
+        },
+        {
+            "key": "plivo_auth_token",
+            "type": "password",
+            "default": "",
+            "label": "Plivo: Auth Token (also checks Plivo's signature)",
+            "secret": true
+        },
+        {
+            "key": "telnyx_api_key",
+            "type": "password",
+            "default": "",
+            "label": "Telnyx: API key",
+            "secret": true
+        },
+        {
+            "key": "telnyx_public_key",
+            "type": "text",
+            "default": "",
+            "label": "Telnyx: public key (checks the webhook signature)"
+        },
+        {
+            "key": "bandwidth_account_id",
+            "type": "text",
+            "default": "",
+            "label": "Bandwidth: account ID"
+        },
+        {
+            "key": "bandwidth_application_id",
+            "type": "text",
+            "default": "",
+            "label": "Bandwidth: messaging application ID"
+        },
+        {
+            "key": "bandwidth_username",
+            "type": "text",
+            "default": "",
+            "label": "Bandwidth: API user name"
+        },
+        {
+            "key": "bandwidth_password",
+            "type": "password",
+            "default": "",
+            "label": "Bandwidth: API password",
+            "secret": true
+        },
+        {
+            "key": "sinch_service_plan_id",
+            "type": "text",
+            "default": "",
+            "label": "Sinch: service plan ID"
+        },
+        {
+            "key": "sinch_api_token",
+            "type": "password",
+            "default": "",
+            "label": "Sinch: API token",
+            "secret": true
+        },
+        {
+            "key": "sinch_region",
+            "type": "select",
+            "default": "us",
+            "label": "Sinch: region",
+            "options": {
+                "us": "US",
+                "eu": "EU",
+                "au": "Australia",
+                "br": "Brazil",
+                "ca": "Canada"
+            }
+        },
+        {
+            "key": "voipms_username",
+            "type": "text",
+            "default": "",
+            "label": "VoIP.ms: API user name (your e-mail)"
+        },
+        {
+            "key": "voipms_api_password",
+            "type": "password",
+            "default": "",
+            "label": "VoIP.ms: API password",
+            "secret": true
+        },
+        {
+            "key": "bulkvs_username",
+            "type": "text",
+            "default": "",
+            "label": "BulkVS: API user name"
+        },
+        {
+            "key": "bulkvs_password",
+            "type": "password",
+            "default": "",
+            "label": "BulkVS: API password (from API Credentials -> Rest API)",
+            "secret": true
+        }
+    ]
+}

@@ -1,0 +1,59 @@
+{
+    "slug": "invites",
+    "name": "Invites",
+    "name_i18n": {
+        "en": "Invites"
+    },
+    "version": "1.0.0",
+    "requires_aipbx": "1.75.0",
+    "author": "OwnPBX",
+    "author_url": "https://github.com/DanversKara/OwnPBX.org/tree/main/plugins/invites",
+    "type": "official",
+    "category": "integration",
+    "icon": "fas fa-user-plus",
+    "icon_style": "color: #10b981;",
+    "description": "Invite people to the PBX with a link to copy or an e-mail. A link is for one person or reusable (up to a number of uses), runs out after the days you choose, and makes a normal user or a guest with the guest rules you pick. The person chooses a user name and password and gets an extension that works at once.",
+    "description_i18n": {
+        "en": "Invite people to the PBX with a link to copy or an e-mail. A link is for one person or reusable (up to a number of uses), runs out after the days you choose, and makes a normal user or a guest with the guest rules you pick. The person chooses a user name and password and gets an extension that works at once."
+    },
+    "tables": [
+        "plg_invites",
+        "plg_invite_uses"
+    ],
+    "scopes": [],
+    "hooks": {
+        "public_endpoints": true,
+        "admin_page": {
+            "group": "integrations"
+        }
+    },
+    "settings_schema": [
+        {
+            "key": "ext_from",
+            "type": "number",
+            "default": "3000",
+            "label": "First extension for invited people",
+            "help": "Accepted invites take the next free extension from this range."
+        },
+        {
+            "key": "ext_to",
+            "type": "number",
+            "default": "3999",
+            "label": "Last extension for invited people"
+        },
+        {
+            "key": "default_days",
+            "type": "number",
+            "default": "7",
+            "label": "Days a new invite stays valid",
+            "help": "Pre-filled on the invite form; 1 to 90."
+        },
+        {
+            "key": "notify_email",
+            "type": "text",
+            "default": "",
+            "label": "E-mail when someone joins",
+            "help": "Leave empty for no e-mail."
+        }
+    ]
+}

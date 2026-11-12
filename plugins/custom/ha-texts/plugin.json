@@ -1,0 +1,50 @@
+{
+    "slug": "ha-texts",
+    "name": "Home Assistant texts",
+    "name_i18n": {
+        "en": "Home Assistant texts"
+    },
+    "version": "1.0.0",
+    "requires_aipbx": "1.75.0",
+    "author": "OwnPBX",
+    "author_url": "https://github.com/DanversKara/OwnPBX.org/tree/main/plugins/ha-texts",
+    "type": "official",
+    "category": "integration",
+    "icon": "fas fa-house-signal",
+    "icon_style": "color: #18bcf2;",
+    "description": "Texting for Home Assistant and the ESP32-S3-Box panel: an inbox and a send address with a token, the same /messages/inbox and /messages/send the old PBX had. A panel's extension sees its Chat messages and the SMS of the numbers its user has; it texts extensions through Chat and phone numbers through SMS.",
+    "description_i18n": {
+        "en": "Texting for Home Assistant and the ESP32-S3-Box panel: an inbox and a send address with a token, the same /messages/inbox and /messages/send the old PBX had. A panel's extension sees its Chat messages and the SMS of the numbers its user has; it texts extensions through Chat and phone numbers through SMS."
+    },
+    "tables": [],
+    "scopes": [],
+    "hooks": {
+        "public_endpoints": true,
+        "admin_page": {
+            "group": "integrations"
+        }
+    },
+    "settings_schema": [
+        {
+            "key": "extensions",
+            "type": "text",
+            "default": "",
+            "label": "Extensions that may use it (comma separated, e.g. 8803)",
+            "help": "Leave empty for none: every panel or Home Assistant extension must be listed."
+        },
+        {
+            "key": "include_chat",
+            "type": "boolean",
+            "default": "1",
+            "label": "Chat messages",
+            "help": "Show direct Chat messages with other extensions, and send to extensions through Chat."
+        },
+        {
+            "key": "include_sms",
+            "type": "boolean",
+            "default": "1",
+            "label": "SMS",
+            "help": "Show the texts of the SMS numbers the extension's user has, and send to phone numbers through SMS (needs the SMS plugin)."
+        }
+    ]
+}

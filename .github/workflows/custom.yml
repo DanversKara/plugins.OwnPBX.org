@@ -1,0 +1,51 @@
+name: Custom plugins
+
+on:
+  push:
+    paths: ['plugins/custom/**', '.github/workflows/custom.yml']
+  pull_request:
+    paths: ['plugins/custom/**', '.github/workflows/custom.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test-only
+          MYSQL_DATABASE: sms_test
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -ptest-only"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+    env:
+      SMS_TEST_DSN: mysql:host=127.0.0.1;dbname=sms_test
+      SMS_TEST_USER: root
+      SMS_TEST_PASSWORD: test-only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          extensions: curl, mbstring, pdo_mysql
+          coverage: none
+      - name: Syntax
+        run: find plugins/custom -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Manifests
+        run: |
+          for m in plugins/custom/*/plugin.json; do
+            slug=$(php -r 'echo json_decode(file_get_contents($argv[1]), true)["slug"] ?? "";' "$m")
+            [ "$slug" = "$(basename "$(dirname "$m")")" ] || { echo "$m: slug must match the folder"; exit 1; }
+          done
+      - name: No secrets in the Home Assistant template
+        run: "! grep -rEn 'X-Msg-Token: \"[0-9a-f]{20,}\"' plugins/custom"
+      - name: SMS tests
+        run: |
+          php plugins/custom/sms/tests/providers.php
+          php plugins/custom/sms/tests/media_security.php
+          php plugins/custom/sms/tests/receive.php
+          php plugins/custom/sms/tests/concurrent_receive.php

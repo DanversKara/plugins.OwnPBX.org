@@ -7,6 +7,8 @@ and the home of **community plugins**.
   folder of the main repository). They are released and tested together
   with the PBX, so they are not copied here. Report their bugs and send their fixes to the main repository.
 - **Community plugins live here**, under [`plugins/community/<slug>/`](plugins/community/).
+- **OwnPBX's own and modified plugins** (Home Assistant texts, Invites, Billing, SMS/MMS) are in
+  [`plugins/custom/`](plugins/custom/); [`UPSTREAM.md`](UPSTREAM.md) tracks the upstream version they are based on.
 
 ---
 
