@@ -1,0 +1,78 @@
+{
+    "slug": "launcher",
+    "name": "TV Launcher notifications",
+    "name_i18n": {
+        "en": "TV Launcher notifications"
+    },
+    "version": "1.0.0",
+    "requires_aipbx": "1.75.0",
+    "author": "OwnPBX",
+    "author_url": "https://github.com/DanversKara/OwnPBX.org/tree/main/plugins/launcher",
+    "type": "official",
+    "category": "integration",
+    "icon": "fas fa-tv",
+    "icon_style": "color: #7048e8;",
+    "description": "One read-only address a TV launcher, a tablet or a dashboard can poll for what just happened: a call ringing now (caller ID, name, which extension, inside or outside line), new SMS and Chat messages with the first lines, and new voicemail with the first lines of its AI transcript. Token protected; nothing can be changed through it.",
+    "description_i18n": {
+        "en": "One read-only address a TV launcher, a tablet or a dashboard can poll for what just happened: a call ringing now (caller ID, name, which extension, inside or outside line), new SMS and Chat messages with the first lines, and new voicemail with the first lines of its AI transcript. Token protected; nothing can be changed through it."
+    },
+    "tables": [],
+    "scopes": [],
+    "hooks": {
+        "public_endpoints": true,
+        "admin_page": {
+            "group": "integrations"
+        }
+    },
+    "settings_schema": [
+        {
+            "key": "extensions",
+            "type": "text",
+            "default": "",
+            "label": "Extensions to watch (comma separated, empty = all)",
+            "help": "Only calls, messages and voicemail belonging to these extensions are reported. Leave empty to report everything on the PBX."
+        },
+        {
+            "key": "include_calls",
+            "type": "boolean",
+            "default": "1",
+            "label": "Calls",
+            "help": "A call ringing or in progress right now, with the caller's number and name."
+        },
+        {
+            "key": "include_sms",
+            "type": "boolean",
+            "default": "1",
+            "label": "SMS",
+            "help": "Incoming texts (needs the SMS plugin)."
+        },
+        {
+            "key": "include_chat",
+            "type": "boolean",
+            "default": "1",
+            "label": "Chat",
+            "help": "Incoming Chat messages between extensions."
+        },
+        {
+            "key": "include_voicemail",
+            "type": "boolean",
+            "default": "1",
+            "label": "Voicemail",
+            "help": "New voicemail, with the first lines of the transcript when AI voicemail is on."
+        },
+        {
+            "key": "preview_chars",
+            "type": "number",
+            "default": "160",
+            "label": "How much text to send (characters)",
+            "help": "The first part of a message or transcript, enough for a glance at the screen. 0 sends none."
+        },
+        {
+            "key": "window_minutes",
+            "type": "number",
+            "default": "10",
+            "label": "How far back to look (minutes)",
+            "help": "Anything older than this is never reported, so a launcher that was switched off does not show a flood of old events when it comes back."
+        }
+    ]
+}
