@@ -64,6 +64,15 @@ final class LauncherFeed
         return $watched === [] || in_array($ext, $watched, true);
     }
 
+    /** "611,1002" or "611, 1002" to ['611', '1002']; anything that is not an extension is dropped. */
+    private static function extList(string $csv): array
+    {
+        return array_values(array_unique(array_filter(array_map(
+            static fn(string $e): string => preg_replace('/\D+/', '', trim($e)) ?? '',
+            explode(',', $csv)
+        ), static fn(string $e): bool => $e !== '')));
+    }
+
     /**
      * Ids must grow with time across all four sources and stay small enough for a client that
      * keeps them in an integer: seconds since 2026-01-01, times four for the source, plus one
@@ -328,8 +337,9 @@ final class LauncherFeed
             $q = getDB()->prepare("SELECT m.id, m.body, UNIX_TIMESTAMP(m.created_at) AS at_unix, m.peer, n.number,
                     (SELECT c.name FROM plg_sms_contacts c
                        WHERE c.number_id = m.number_id AND c.phone = m.peer LIMIT 1) AS contact,
-                    (SELECT u.extension FROM plg_sms_access a JOIN sys_users u ON u.id = a.user_id
-                       WHERE a.number_id = m.number_id LIMIT 1) AS ext
+                    (SELECT GROUP_CONCAT(u.extension) FROM plg_sms_access a
+                       JOIN sys_users u ON u.id = a.user_id
+                       WHERE a.number_id = m.number_id) AS exts
                 FROM plg_sms_messages m
                 LEFT JOIN plg_sms_numbers n ON n.id = m.number_id
                 WHERE m.direction = 'in' AND m.created_at >= FROM_UNIXTIME(?)
@@ -342,10 +352,16 @@ final class LauncherFeed
         }
         $out = [];
         foreach ($rows as $m) {
-            $ext = preg_replace('/\D+/', '', (string) ($m['ext'] ?? '')) ?? '';
-            if ($ext !== '' && !self::watches($watched, $ext)) {
+            // A texting number usually belongs to several people. Taking whichever one the
+            // database happened to return first meant a number shared with the watched extension
+            // could still be reported against somebody else and filtered out - the same text came
+            // back as extension 1000 one minute and 1002 the next.
+            $owners = self::extList((string) ($m['exts'] ?? ''));
+            $forUs = array_values(array_filter($owners, static fn(string $e): bool => self::watches($watched, $e)));
+            if ($owners !== [] && $forUs === []) {
                 continue;
             }
+            $ext = $forUs[0] ?? '';
             $at = (int) ($m['at_unix'] ?? 0);
             $peer = (string) $m['peer'];
             $out[] = [
@@ -386,10 +402,7 @@ final class LauncherFeed
         }
         $out = [];
         foreach ($rows as $m) {
-            $recipients = array_values(array_filter(array_map(
-                static fn(string $e): string => preg_replace('/\D+/', '', trim($e)) ?? '',
-                explode(',', (string) ($m['to_exts'] ?? ''))
-            ), static fn(string $e): bool => $e !== ''));
+            $recipients = self::extList((string) ($m['to_exts'] ?? ''));
             $forUs = array_values(array_filter($recipients, static fn(string $e): bool => self::watches($watched, $e)));
             if ($forUs === []) {
                 continue;
@@ -587,20 +600,27 @@ final class LauncherFeed
         $out['sms'] = self::diagnoseRows(
             'plg_sms_messages',
             "SELECT m.id, m.peer, m.created_at,
-                    (SELECT u.extension FROM plg_sms_access a JOIN sys_users u ON u.id = a.user_id
-                       WHERE a.number_id = m.number_id LIMIT 1) AS ext
+                    (SELECT GROUP_CONCAT(u.extension) FROM plg_sms_access a
+                       JOIN sys_users u ON u.id = a.user_id
+                       WHERE a.number_id = m.number_id) AS exts
              FROM plg_sms_messages m
              WHERE m.direction = 'in' AND m.created_at >= FROM_UNIXTIME(?)
              ORDER BY m.id DESC LIMIT 5",
             $notBefore,
             static function (array $m) use ($watched, $mark): string {
-                $ext = preg_replace('/\D+/', '', (string) ($m['ext'] ?? '')) ?? '';
+                $owners = self::extList((string) ($m['exts'] ?? ''));
+                $any = false;
+                foreach ($owners as $e) {
+                    if (self::watches($watched, $e)) {
+                        $any = true;
+                    }
+                }
                 return sprintf(
                     '%s from %s → %s  %s',
                     (string) $m['created_at'],
                     (string) $m['peer'],
-                    $ext !== '' ? 'ext ' . $ext : 'no extension owns this number',
-                    $ext === '' ? '✓ shown' : $mark(self::watches($watched, $ext))
+                    $owners !== [] ? 'ext ' . implode(', ', $owners) : 'no extension owns this number',
+                    $owners === [] ? '✓ shown' : $mark($any)
                 );
             },
             $minutes
