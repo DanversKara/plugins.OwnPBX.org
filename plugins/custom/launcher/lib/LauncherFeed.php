@@ -137,31 +137,44 @@ final class LauncherFeed
             if (stripos($r['state'], 'ring') === false) {
                 continue;
             }
-            // The extension being called: PJSIP/<ext>-sip, PJSIP/<ext>-webrtc, ...
-            $peer = (string) preg_replace('/^PJSIP\/([^-]+).*/', '$1', $r['name']);
-            $toExt = preg_replace('/\D+/', '', $peer) ?? '';
+            $toExt = self::extensionOf($r['name']);
             if ($toExt === '' || !self::watches($watched, $toExt)) {
                 continue;
             }
             [$from, $callKey] = self::callerOf($r, $byUniqueId, $toExt);
-            if ($from === '' || isset($seen[$callKey])) {
+            if (isset($seen[$callKey])) {
                 continue;
             }
             $seen[$callKey] = true;
             $at = time();
+            // A phone is ringing either way. Saying so without a name beats saying nothing,
+            // which is what dropping the event did whenever the caller could not be worked out.
             $out[] = [
                 'id' => self::callId($callKey, $at),
                 'type' => 'call',
                 'title' => 'Incoming call',
-                'who' => self::callerName($from) ?: $from,
+                'who' => $from === '' ? '' : (self::callerName($from) ?: $from),
                 'number' => $from,
                 'to' => self::extLabel($toExt),
-                'line' => strlen($from) > 6 ? 'pstn' : 'internal',
+                'line' => $from === '' ? '' : (strlen($from) > 6 ? 'pstn' : 'internal'),
                 'text' => '',
                 'at' => $at,
             ];
         }
         return $out;
+    }
+
+    /**
+     * The extension a channel belongs to, or "" when it is not an extension's leg.
+     *
+     * A phone's channel is PJSIP/<ext>-sip, PJSIP/<ext>-webrtc and so on, so the part before the
+     * first dash is the extension and nothing else. A trunk such as PJSIP/236248_openpbx has
+     * digits in its name too, and stripping the letters out of it would invent an extension.
+     */
+    private static function extensionOf(string $channelName): string
+    {
+        $peer = (string) preg_replace('/^PJSIP\/([^-]+).*/', '$1', $channelName);
+        return ctype_digit($peer) ? $peer : '';
     }
 
     /** One row per live channel, from "core show channels concise". */
@@ -179,7 +192,10 @@ final class LauncherFeed
                 'exten' => $f[2],
                 'state' => $f[4],
                 'cid' => (string) preg_replace('/[^0-9+]/', '', $f[7]),
-                'uniqueid' => trim((string) ($f[13] ?? '')),
+                // The unique id is the last field, and counting from the end survives Asterisk
+                // adding one: at a fixed index 13 it silently came back empty, which broke every
+                // lookup that pairs a ringing leg with the call it belongs to.
+                'uniqueid' => trim((string) end($f)),
             ];
         }
         return $rows;
@@ -219,6 +235,18 @@ final class LauncherFeed
             $candidates[] = $byUniqueId[$linked]['cid'];
         }
         $candidates[] = $own;
+        // Failing that: the only channel on the PBX that is not an extension's own leg is the
+        // trunk the call came in on. With two such calls at once there is no telling them apart,
+        // so this is used only when there is exactly one.
+        $outside = [];
+        foreach ($byUniqueId as $r) {
+            if ($r['cid'] !== '' && self::extensionOf($r['name']) === '') {
+                $outside[$r['cid']] = $r['cid'];
+            }
+        }
+        if (count($outside) === 1) {
+            $candidates[] = reset($outside);
+        }
         $candidates[] = $leg['cid'];
 
         $from = '';
@@ -514,21 +542,28 @@ final class LauncherFeed
         $out = [];
 
         $rows = self::channels();
+        // The same map the feed itself builds: without it no caller can be resolved here, and the
+        // panel would report "no caller" for calls the feed reports perfectly well.
+        $byUniqueId = [];
+        foreach ($rows as $r) {
+            if ($r['uniqueid'] !== '') {
+                $byUniqueId[$r['uniqueid']] = $r;
+            }
+        }
         $lines = [];
         foreach ($rows as $r) {
-            $peer = (string) preg_replace('/^PJSIP\/([^-]+).*/', '$1', $r['name']);
-            $toExt = preg_replace('/\D+/', '', $peer) ?? '';
+            $toExt = self::extensionOf($r['name']);
             $ringing = stripos($r['state'], 'ring') !== false;
             $from = '';
             if ($ringing && $toExt !== '') {
-                [$from] = self::callerOf($r, [], $toExt);
+                [$from] = self::callerOf($r, $byUniqueId, $toExt);
             }
             $lines[] = sprintf(
                 '%s — %s%s%s',
                 $r['name'],
                 $r['state'],
                 $from !== '' ? ', from ' . $from : ($r['cid'] !== '' ? ', leg caller id ' . $r['cid'] : ''),
-                !$ringing ? ' (not ringing)' : ($toExt === '' ? ' (not an extension leg)' : ' ' . $mark(self::watches($watched, $toExt)))
+                !$ringing ? ' (not ringing)' : ($toExt === '' ? ' (a trunk, not an extension)' : ' ' . $mark(self::watches($watched, $toExt)))
             );
         }
         $out['calls'] = [
