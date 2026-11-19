@@ -201,12 +201,10 @@ final class Sms
                 try {
                     $reply = SmsGuardService::handle((string) $m['from'], (string) $m['text']);
                     if ($reply !== null && $reply !== '') {
-                        $numRow = $db->prepare('SELECT * FROM plg_sms_numbers WHERE id = ?');
-                        $numRow->execute([$numberId]);
-                        $num = $numRow->fetch(PDO::FETCH_ASSOC);
-                        if ($num) {
-                            self::send($num, (string) $m['from'], $reply, [], 0, $settings);
-                        }
+                        // Queued, not sent: this is the provider's own webhook, and sending from
+                        // inside it keeps the provider waiting on our SMS API call. The worker
+                        // sends it a moment later. The command itself already ran.
+                        SmsGuardService::queueReply((string) $m['from'], $reply);
                     }
                 } catch (\Throwable $e) {
                     error_log('sms guard: ' . $e->getMessage());

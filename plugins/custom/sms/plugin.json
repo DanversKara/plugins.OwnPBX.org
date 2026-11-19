@@ -5,7 +5,7 @@
         "en": "SMS / MMS",
         "tr": "SMS / MMS"
     },
-    "version": "1.3.0",
+    "version": "1.3.1",
     "requires_aipbx": "1.71.0",
     "author": "OwnPBX",
     "author_url": "https://github.com/DanversKara/OwnPBX.org/tree/main/plugins/sms",
@@ -39,7 +39,8 @@
                 "tr": "Mesajlar"
             },
             "icon": "fas fa-comment-sms"
-        }
+        },
+        "worker": true
     },
     "settings_schema": [
         {
