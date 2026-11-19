@@ -7,7 +7,7 @@ an upstream release can always be compared against our versions.
 | Plugin | Slug | Version | Kind | What it does |
 | :--- | :--- | :--- | :--- | :--- |
 | **Home Assistant texts** | [`ha-texts`](ha-texts/) | 1.0.0 | Own | Lets Home Assistant (and the ESP32-S3-Box-3 "Messages" app) read and send PBX texts/chat: `/api/plugins/ha-texts/messages/inbox` and `/send`, token protected. Includes the HA package ([`home-assistant/`](ha-texts/home-assistant/)) and the box firmware ([`esp32/`](ha-texts/esp32/)). |
-| **TV Launcher notifications** | [`launcher`](launcher/) | 1.0.2 | Own | One read-only address a TV launcher, tablet or dashboard polls for what just happened: a call ringing now, new SMS and Chat with the first lines, new voicemail with the first lines of its AI transcript. Token protected. |
+| **TV Launcher notifications** | [`launcher`](launcher/) | 1.0.3 | Own | One read-only address a TV launcher, tablet or dashboard polls for what just happened: a call ringing now, new SMS and Chat with the first lines, new voicemail with the first lines of its AI transcript. Token protected. |
 | **Invites** | [`invites`](invites/) | 1.0.0 | Own | Admin-made invite links (single or multi-use) that create an extension/user on the spot; copy link or e-mail it. |
 | **Billing / store** | [`billing`](billing/) | 1.0.1 | Own | Monthly Stripe plans that set each user's outside-call minutes, texts and fax; a public Store whose sign-ups wait for approval; limits can be watched before they are enforced. |
 | **SMS / MMS** | [`sms`](sms/) | 1.3.0 | Modified from upstream `sms` 1.2.2 | Upstream SMS plugin plus: unread badges per number (`user/badge.php`), Edit button for numbers, the provider list defaults to a configured provider, OwnPBX naming. |

@@ -241,10 +241,12 @@ final class LauncherFeed
         $outside = [];
         foreach ($byUniqueId as $r) {
             if ($r['cid'] !== '' && self::extensionOf($r['name']) === '') {
-                $outside[$r['cid']] = $r['cid'];
+                $outside[$r['uniqueid']] = $r['cid'];
             }
         }
+        $outsideId = '';
         if (count($outside) === 1) {
+            $outsideId = (string) array_key_first($outside);
             $candidates[] = reset($outside);
         }
         $candidates[] = $leg['cid'];
@@ -258,7 +260,18 @@ final class LauncherFeed
                 break;
             }
         }
-        $key = $linked !== '' ? 'L' . $linked : $toExt . '|' . $from;
+        // The key has to name this call and no other. "<ext>|<number>" does not: the same person
+        // ringing the same extension an hour later lands on the key their first call already
+        // used, is handed that call's id, and is filtered out as something already seen - so the
+        // second call from a number silently stopped appearing. Every form below comes from a
+        // channel's unique id, which Asterisk never repeats.
+        if ($linked !== '') {
+            $key = 'L' . $linked;                 // the whole call, however many phones it rings
+        } elseif ($outsideId !== '') {
+            $key = 'U' . $outsideId;              // the trunk leg it came in on, which is the call
+        } else {
+            $key = 'X' . $leg['uniqueid'];        // this leg alone: twin legs are weeded out later
+        }
         return [$from, $key];
     }
 

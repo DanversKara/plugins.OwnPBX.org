@@ -4,7 +4,7 @@
     "name_i18n": {
         "en": "TV Launcher notifications"
     },
-    "version": "1.0.2",
+    "version": "1.0.3",
     "requires_aipbx": "1.75.0",
     "author": "OwnPBX",
     "author_url": "https://github.com/DanversKara/OwnPBX.org/tree/main/plugins/launcher",
