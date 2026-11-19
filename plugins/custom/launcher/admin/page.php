@@ -55,3 +55,20 @@ $sample = json_encode([
         </form>
     </div>
 </div>
+
+<?php $diag = LauncherFeed::diagnose($settings); ?>
+<div class="card u-mb-20">
+    <div class="card-header"><div class="card-title"><i class="fas fa-stethoscope"></i> What the sources see right now</div></div>
+    <div class="u-p-16">
+        <p class="u-hint">Reload this page while a phone is ringing, or just after a text or chat arrives. If a line says <strong>not watched</strong>, the event happened but the extension list above filtered it out.</p>
+        <?php foreach (['calls' => 'Live calls', 'sms' => 'Texts', 'chat' => 'Chat'] as $key => $label): ?>
+            <div class="form-group">
+                <label class="form-label"><?php echo $h($label); ?></label>
+                <p class="u-hint"><?php echo $h($diag[$key]['note'] ?? ''); ?></p>
+                <?php if (($diag[$key]['lines'] ?? []) !== []): ?>
+                    <pre class="u-p-16 u-overflow-x-auto u-bg-subtle"><?php echo $h(implode("\n", $diag[$key]['lines'])); ?></pre>
+                <?php endif; ?>
+            </div>
+        <?php endforeach; ?>
+    </div>
+</div>
