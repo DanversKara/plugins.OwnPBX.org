@@ -194,6 +194,24 @@ final class Sms
             if (($settings['email_notify'] ?? '1') === '1') {
                 self::notify($numberId, $messageId, $m['from'], $m['text'], count($m['media']));
             }
+            // A text may be an emergency command for the PBX itself - see SmsGuardService, which
+            // answers only a number on its list and only when the message proves who sent it.
+            // It is wrapped because a text arriving must never fail on account of this.
+            if (class_exists('SmsGuardService')) {
+                try {
+                    $reply = SmsGuardService::handle((string) $m['from'], (string) $m['text']);
+                    if ($reply !== null && $reply !== '') {
+                        $numRow = $db->prepare('SELECT * FROM plg_sms_numbers WHERE id = ?');
+                        $numRow->execute([$numberId]);
+                        $num = $numRow->fetch(PDO::FETCH_ASSOC);
+                        if ($num) {
+                            self::send($num, (string) $m['from'], $reply, [], 0, $settings);
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    error_log('sms guard: ' . $e->getMessage());
+                }
+            }
             $new++;
         }
         return $new;
