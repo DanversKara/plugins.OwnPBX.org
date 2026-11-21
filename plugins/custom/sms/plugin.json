@@ -5,7 +5,7 @@
         "en": "SMS / MMS",
         "tr": "SMS / MMS"
     },
-    "version": "1.3.2",
+    "version": "1.3.3",
     "requires_aipbx": "1.71.0",
     "author": "OwnPBX",
     "author_url": "https://github.com/DanversKara/OwnPBX.org/tree/main/plugins/sms",
@@ -43,6 +43,19 @@
         "worker": true
     },
     "settings_schema": [
+        {
+            "key": "sms_daily_cap_per_user",
+            "type": "number",
+            "default": "100",
+            "label": "Daily cap: texts per user per day (0 = no cap)",
+            "help": "Backstop against runaway sending, applied whether or not billing is on. Billing limits stay the stricter layer when enforced."
+        },
+        {
+            "key": "sms_daily_cap_per_peer",
+            "type": "number",
+            "default": "20",
+            "label": "Daily cap: texts to one destination number per day, all senders (0 = no cap)"
+        },
         {
             "key": "email_notify",
             "type": "boolean",

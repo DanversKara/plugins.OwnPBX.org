@@ -18,6 +18,17 @@ final class Sms
     public const MAX_MEDIA = 3;
     public const MAX_MEDIA_BYTES = 5 * 1024 * 1024;
 
+    /**
+     * This plugin's own daily caps (see checkDailyCaps): generous personal-use
+     * defaults that apply whether or not billing is enabled, so an authenticated
+     * user with an assigned number can never send unlimited texts at provider
+     * cost. Billing stays the stricter layer when it is on and enforcing.
+     * Overridable in the plugin settings (sms_daily_cap_per_user /
+     * sms_daily_cap_per_peer); 0 in settings turns that cap off.
+     */
+    public const DAILY_CAP_PER_USER = 100;
+    public const DAILY_CAP_PER_PEER = 20;
+
     /** @return array<string, class-string<SmsProvider>> id => class, in the order shown */
     public static function providers(): array
     {
@@ -49,11 +60,19 @@ final class Sms
         return $key;
     }
 
-    /** https://<portal> as providers reach it: the portal's domain, else the address this request came to. */
+    /** https://<portal> as providers reach it: the configured portal domain, else the PBX's external domain setting, else this server's own address — never the request Host header. */
     public static function baseUrl(): string
     {
+        // Same precedence as core ForgotPasswordService::portalUrl(). Never
+        // the request Host header — it is attacker-controlled.
         $host = function_exists('portalEnv') ? trim((string) portalEnv('PORTAL_DOMAIN', '')) : '';
-        return 'https://' . ($host !== '' ? $host : (string) ($_SERVER['HTTP_HOST'] ?? 'localhost'));
+        if ($host === '' && function_exists('getSystemSetting')) {
+            $host = trim((string) getSystemSetting('pjsip_external_domain', ''));
+        }
+        if ($host === '' || !preg_match('/^[A-Za-z0-9.-]+(:\d+)?$/', $host)) {
+            $host = preg_replace('/[^A-Za-z0-9.:-]/', '', (string) ($_SERVER['SERVER_ADDR'] ?? 'localhost'));
+        }
+        return 'https://' . $host;
     }
 
     public static function webhookUrl(string $provider): string
@@ -329,9 +348,21 @@ final class Sms
         if (count($files) + count($extraMedia) > self::MAX_MEDIA) {
             throw new \InvalidArgumentException('At most ' . self::MAX_MEDIA . ' pictures per message.');
         }
-        // Billing (plugin): texts left this month. Allowed when billing is off or not enforced.
+        // This plugin's own daily caps first: they apply whether or not billing is on.
+        self::checkDailyCaps($userId, $peer, $settings);
+        // Billing (plugin): reserve one text of this month's quota BEFORE the provider
+        // is called, so two sends at the same time cannot both pass the check and
+        // then both count. A failed send gives its reservation back below.
         $bridge = self::billingBridge();
-        if ($bridge && !BillingBridge::allows($userId, 'messages')) {
+        $reservedId = self::reserveBillingText($userId, $peer, $bridge);
+        $billAfterSend = false;
+        if ($bridge && $reservedId === null) {
+            // Billing too old for reserve(): the old check-then-record.
+            if (!BillingBridge::allows($userId, 'messages')) {
+                throw new \InvalidArgumentException('Your plan\'s texts for this month are used up.');
+            }
+            $billAfterSend = true;
+        } elseif ($reservedId === 0) {
             throw new \InvalidArgumentException('Your plan\'s texts for this month are used up.');
         }
         $provider = self::provider((string) $number['provider'], $settings);
@@ -361,14 +392,96 @@ final class Sms
         try {
             $id = $provider->send((string) $number['number'], $peer, $text, array_map(static fn(array $m): string => self::mediaUrl($m, true), $media));
             $db->prepare("UPDATE plg_sms_messages SET status = 'sent', provider_id = ? WHERE id = ?")->execute([mb_substr($id, 0, 100), $messageId]);
-            if ($bridge) {
+            if ($billAfterSend) {
                 BillingBridge::record($userId, 'messages', 1, 'to ' . $peer);
             }
         } catch (\Throwable $e) {
+            if (($reservedId ?? 0) > 0) {
+                self::releaseBillingReservation((int) $reservedId);
+            }
             $db->prepare("UPDATE plg_sms_messages SET status = 'failed', error = ? WHERE id = ?")->execute([mb_substr($e->getMessage(), 0, 255), $messageId]);
             throw new \RuntimeException('Not sent: ' . $e->getMessage());
         }
         return $messageId;
+    }
+
+    /**
+     * The SMS plugin's own daily caps, checked before every send and independent of
+     * billing: at most DAILY_CAP_PER_USER texts per user per day, and at most
+     * DAILY_CAP_PER_PEER texts to one destination number per day (across all
+     * senders, so one number cannot be flooded). Auto-replies run as user 0 and
+     * skip the per-user cap, but the per-destination cap still bounds them.
+     * Counts outgoing rows, sent or failed, since midnight. A check-then-insert
+     * race at the exact boundary can let a couple of sends past the cap; the cap
+     * is a cost backstop, not billing, so that overshoot is acceptable.
+     */
+    private static function checkDailyCaps(int $userId, string $peer, array $settings): void
+    {
+        $today = date('Y-m-d 00:00:00');
+        $db = getDB();
+        $perUser = self::dailyCap($settings, 'sms_daily_cap_per_user', self::DAILY_CAP_PER_USER);
+        if ($userId > 0 && $perUser > 0) {
+            $q = $db->prepare("SELECT COUNT(*) FROM plg_sms_messages WHERE direction = 'out' AND user_id = ? AND created_at >= ?");
+            $q->execute([$userId, $today]);
+            if ((int) $q->fetchColumn() >= $perUser) {
+                throw new \InvalidArgumentException("You have sent {$perUser} texts today. Try again tomorrow.");
+            }
+        }
+        $perPeer = self::dailyCap($settings, 'sms_daily_cap_per_peer', self::DAILY_CAP_PER_PEER);
+        if ($perPeer > 0) {
+            $q = $db->prepare("SELECT COUNT(*) FROM plg_sms_messages WHERE direction = 'out' AND peer = ? AND created_at >= ?");
+            $q->execute([$peer, $today]);
+            if ((int) $q->fetchColumn() >= $perPeer) {
+                throw new \InvalidArgumentException("That number has already received {$perPeer} texts today. Try again tomorrow.");
+            }
+        }
+    }
+
+    /** A cap from settings, or the default; 0 turns that cap off, a negative is ignored. */
+    private static function dailyCap(array $settings, string $key, int $default): int
+    {
+        $v = (int) ($settings[$key] ?? $default);
+        return $v < 0 ? $default : $v;
+    }
+
+    /**
+     * Reserves one text of the month's billing quota; returns the usage row id, 0
+     * when the plan's texts are used up, or null when billing is off / this
+     * billing is too old to reserve (the caller then falls back to allows() +
+     * record()). Prefers a BillingBridge::reserve() forwarder when the core has
+     * one; otherwise calls Billing::reserve() directly once the bridge has loaded
+     * the class. A failure here degrades to the old check, never to a blocked send.
+     */
+    private static function reserveBillingText(int $userId, string $peer, bool $bridge): ?int
+    {
+        if (!$bridge) {
+            return null;
+        }
+        try {
+            if (method_exists('BillingBridge', 'reserve')) {
+                return (int) BillingBridge::reserve($userId, 'messages', 1, 'to ' . $peer);
+            }
+            if (BillingBridge::load() && method_exists('Billing', 'reserve')) {
+                return (int) Billing::reserve($userId, 'messages', 1, 'to ' . $peer);
+            }
+        } catch (\Throwable $e) {
+            error_log('sms plugin: billing reserve: ' . $e->getMessage());
+        }
+        return null;
+    }
+
+    /** Gives a billing reservation back (the provider refused the send). */
+    private static function releaseBillingReservation(int $usageId): void
+    {
+        try {
+            if (method_exists('BillingBridge', 'releaseReservation')) {
+                BillingBridge::releaseReservation($usageId);
+            } elseif (method_exists('Billing', 'releaseReservation')) {
+                Billing::releaseReservation($usageId);
+            }
+        } catch (\Throwable $e) {
+            error_log('sms plugin: billing release: ' . $e->getMessage());
+        }
     }
 
     // --- replies ---
