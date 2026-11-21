@@ -10,12 +10,16 @@
 -- Stripe, and the PBX takes its cut (fee_type percent = % of each transaction, monthly = a flat
 -- monthly fee; fee_rate is the % 0-100 or the monthly amount in the plugin currency).
 -- ext_from/ext_to: the reseller's own extension range (NULL = not assigned yet).
+-- stock_base_domain: the base this reseller's stock address uses (NULL = the effective
+-- global base). Added in v1.0.1; existing installs gain it from the core 1.75.60 migration
+-- (plugin schema.sql is CREATE TABLE IF NOT EXISTS only, so it cannot add columns).
 CREATE TABLE IF NOT EXISTS plg_resellers (
     id INT UNSIGNED NOT NULL AUTO_INCREMENT,
     name VARCHAR(80) NOT NULL,
     status VARCHAR(16) NOT NULL DEFAULT 'active',
     stock_subdomain VARCHAR(63) NULL DEFAULT NULL,
     custom_domain VARCHAR(253) NULL DEFAULT NULL,
+    stock_base_domain VARCHAR(253) NULL DEFAULT NULL,
     display_name VARCHAR(80) NOT NULL DEFAULT '',
     logo_path VARCHAR(255) NOT NULL DEFAULT '',
     primary_color VARCHAR(7) NOT NULL DEFAULT '',

@@ -9,7 +9,7 @@ Reseller::setSettings($settings);
 
 $h = static fn($s): string => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
 $reseller = Reseller::resellerForUser((int) ($user['id'] ?? 0));
-$sh = $reseller !== null ? Reseller::stockHost((string) ($reseller['stock_subdomain'] ?? '')) : '';
+$sh = $reseller !== null ? Reseller::stockHostForRow($reseller) : '';
 ?>
 <div class="card u-mb-20">
     <div class="card-header"><div class="card-title"><i class="fas fa-sitemap"></i> Your reseller</div></div>

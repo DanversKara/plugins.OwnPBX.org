@@ -34,7 +34,7 @@ $feeLabel = static function (array $r): string {
                 <td><strong><?php echo $h($r['display_name'] !== '' ? $r['display_name'] : $r['name']); ?></strong>
                     <?php if ($r['display_name'] !== '' && $r['display_name'] !== $r['name']): ?><div class="u-hint"><?php echo $h($r['name']); ?></div><?php endif; ?></td>
                 <td><?php echo $r['status'] === 'active' ? '<span class="badge badge-success">active</span>' : '<span class="badge badge-warning">suspended</span>'; ?></td>
-                <td><?php $sh = Reseller::stockHost((string) $r['stock_subdomain']); echo $sh !== '' ? '<code>' . $h($sh) . '</code>' : '<span class="u-hint">—</span>'; ?></td>
+                <td><?php $sh = Reseller::stockHostForRow($r); echo $sh !== '' ? '<code>' . $h($sh) . '</code>' : '<span class="u-hint">—</span>'; ?></td>
                 <td><?php echo $r['custom_domain'] !== '' && $r['custom_domain'] !== null ? '<code>' . $h($r['custom_domain']) . '</code>' : '<span class="u-hint">—</span>'; ?></td>
                 <td><?php echo $h($r['stripe_mode']); ?></td>
                 <td><?php echo $h($feeLabel($r)); ?></td>
@@ -56,13 +56,17 @@ $feeLabel = static function (array $r): string {
             <?php echo $csrf; ?><input type="hidden" name="reseller_action" value="save_reseller">
             <div class="u-grid-2">
                 <div class="form-group"><label class="form-label">Reseller to change</label>
-                    <select name="reseller_id" class="form-control"><option value="0">New reseller</option>
-                        <?php foreach ($resellers as $r): ?><option value="<?php echo (int) $r['id']; ?>"><?php echo $h($r['name']); ?></option><?php endforeach; ?></select></div>
+                    <select name="reseller_id" id="reseller_to_change" class="form-control"><option value="0">New reseller</option>
+                        <?php foreach ($resellers as $r): ?><option value="<?php echo (int) $r['id']; ?>" data-base="<?php echo $h(Reseller::stockBaseForRow($r)); ?>"><?php echo $h($r['name']); ?></option><?php endforeach; ?></select></div>
                 <div class="form-group"><label class="form-label">Name</label><input type="text" name="name" class="form-control" maxlength="80" required></div>
                 <div class="form-group"><label class="form-label">Display name (brand, optional)</label><input type="text" name="display_name" class="form-control" maxlength="80"></div>
                 <div class="form-group"><label class="form-label">Status</label>
                     <select name="status" class="form-control"><option value="active">active</option><option value="suspended">suspended</option></select></div>
                 <div class="form-group"><label class="form-label">Stock subdomain (e.g. acme — login at acme.&lt;base domain&gt;)</label><input type="text" name="stock_subdomain" class="form-control" maxlength="63"></div>
+                <div class="form-group"><label class="form-label">Stock base domain (login at &lt;subdomain&gt;.&lt;base&gt;)</label>
+                    <select name="stock_base_domain" id="reseller_stock_base" class="form-control">
+                        <?php foreach (Reseller::stockBaseDomains() as $bd): ?><option value="<?php echo $h($bd); ?>"><?php echo $h($bd); ?></option><?php endforeach; ?>
+                    </select></div>
                 <div class="form-group"><label class="form-label">Custom domain (their own domain, optional — paid extra)</label><input type="text" name="custom_domain" class="form-control" maxlength="253"></div>
                 <div class="form-group"><label class="form-label">Brand colour (#rrggbb, optional)</label><input type="text" name="primary_color" class="form-control" maxlength="7" placeholder="#0ea5e9"></div>
                 <div class="form-group"><label class="form-label">Logo path (optional, stored for white-label later)</label><input type="text" name="logo_path" class="form-control" maxlength="255"></div>
@@ -75,8 +79,34 @@ $feeLabel = static function (array $r): string {
                 <div class="form-group"><label class="form-label">Extension range to</label><input type="number" name="ext_to" class="form-control" min="0"></div>
             </div>
             <p class="u-hint">Changing a reseller: pick it, then fill in every field (they replace the old values).
-                Extension ranges must not overlap another reseller's range. A suspended reseller's
-                domains stop resolving to them.</p>
+                The stock base follows the reseller you pick; a base that left the offered list still
+                shows as that reseller's current value. Extension ranges must not overlap another
+                reseller's range. A suspended reseller's domains stop resolving to them.</p>
+            <script>
+                // The stock base follows the reseller being changed, so editing one
+                // shows its stored base selected — even when that base is no longer offered.
+                (function () {
+                    var pick = document.getElementById('reseller_to_change');
+                    var base = document.getElementById('reseller_stock_base');
+                    if (!pick || !base) return;
+                    function syncBase() {
+                        var current = base.querySelectorAll('option[data-current]');
+                        for (var k = 0; k < current.length; k++) current[k].remove();
+                        var opt = pick.options[pick.selectedIndex];
+                        var b = opt ? opt.getAttribute('data-base') : '';
+                        if (!b) return;
+                        for (var i = 0; i < base.options.length; i++) {
+                            if (base.options[i].value === b) { base.selectedIndex = i; return; }
+                        }
+                        var o = document.createElement('option');
+                        o.value = b; o.textContent = b + ' (current)';
+                        o.setAttribute('data-current', '1'); o.selected = true;
+                        base.appendChild(o);
+                    }
+                    pick.addEventListener('change', syncBase);
+                    syncBase();
+                })();
+            </script>
             <div class="form-actions"><button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save reseller</button></div>
         </form>
     </div>

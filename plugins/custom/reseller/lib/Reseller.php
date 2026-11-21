@@ -189,6 +189,13 @@ final class Reseller
                 throw new \InvalidArgumentException('That custom domain is already taken by another reseller.');
             }
         }
+        $base = self::normalizeHost((string) ($in['stock_base_domain'] ?? ''));
+        if ($subdomain === '') {
+            // No subdomain, no stock address: nothing to pin a base to.
+            $base = '';
+        } elseif ($base !== '' && !self::isValidDomain($base)) {
+            throw new \InvalidArgumentException('Stock base domain is not a valid domain name.');
+        }
         $stripeMode = (string) ($in['stripe_mode'] ?? 'platform');
         if (!in_array($stripeMode, self::STRIPE_MODES, true)) {
             throw new \InvalidArgumentException('Unknown Stripe mode.');
@@ -222,6 +229,7 @@ final class Reseller
             'name' => $name,
             'status' => $status,
             'stock_subdomain' => $subdomain === '' ? null : $subdomain,
+            'stock_base_domain' => $base === '' ? null : $base,
             'custom_domain' => $domain === '' ? null : $domain,
             'display_name' => mb_substr(trim((string) ($in['display_name'] ?? '')), 0, 80),
             'logo_path' => mb_substr(trim((string) ($in['logo_path'] ?? '')), 0, 255),
@@ -248,6 +256,41 @@ final class Reseller
 
     // ------------------------------------------------------------- write
 
+    /** @var bool|null */
+    private static ?bool $hasStockBaseColumn = null;
+
+    /**
+     * Does plg_resellers have the per-reseller base column yet (core 1.75.60
+     * migration)? The bundled copy always ships with its core, but the custom
+     * copy can land on an older core — and plugin schema.sql is CREATE TABLE
+     * IF NOT EXISTS only, so it can never add the column to an existing table.
+     */
+    public static function hasStockBaseColumn(): bool
+    {
+        if (self::$hasStockBaseColumn !== null) {
+            return self::$hasStockBaseColumn;
+        }
+        try {
+            $stmt = getDB()->query("SHOW COLUMNS FROM plg_resellers LIKE 'stock_base_domain'");
+            self::$hasStockBaseColumn = $stmt !== false && $stmt->fetch() !== false;
+        } catch (\Throwable $e) {
+            self::$hasStockBaseColumn = false;
+        }
+        return self::$hasStockBaseColumn;
+    }
+
+    /**
+     * Store the reseller's chosen stock base domain. No-op while the column
+     * does not exist yet — those rows keep the legacy effective base.
+     */
+    private static function writeStockBase(int $id, ?string $base): void
+    {
+        if (!self::hasStockBaseColumn()) {
+            return;
+        }
+        getDB()->prepare('UPDATE plg_resellers SET stock_base_domain = ? WHERE id = ?')->execute([$base, $id]);
+    }
+
     public static function create(array $in): int
     {
         $v = self::validated($in);
@@ -264,6 +307,7 @@ final class Reseller
             $v['ext_from'], $v['ext_to'],
         ]);
         $id = (int) $db->lastInsertId();
+        self::writeStockBase($id, $v['stock_base_domain']);
         self::mirrorDomain($id, $v['custom_domain']);
         self::audit($id, 'Reseller created: ' . $v['name']);
         return $id;
@@ -287,6 +331,7 @@ final class Reseller
             $v['logo_path'], $v['primary_color'], $v['stripe_mode'], $v['fee_type'], $v['fee_rate'],
             $v['ext_from'], $v['ext_to'], $id,
         ]);
+        self::writeStockBase($id, $v['stock_base_domain']);
         self::mirrorDomain($id, $v['custom_domain']);
         self::audit($id, 'Reseller saved: ' . $v['name']);
     }
@@ -339,28 +384,82 @@ final class Reseller
 
     // ------------------------------------------------------------- tenants
 
-    /** Base domain for stock subdomains: the plugin setting, else the portal's own domain. */
-    public static function stockBaseDomain(): string
+    /**
+     * The base domains the admin offers for stock addresses: the configured
+     * list (one per line), plus the legacy single-domain setting when set.
+     * Empty list = the portal's own domain (PORTAL_DOMAIN, else request host).
+     * Invalid lines are ignored. The legacy setting is still honoured even
+     * though it no longer shows on the settings page — settings saves only
+     * touch schema keys, so its stored value survives.
+     *
+     * @return list<string>
+     */
+    public static function stockBaseDomains(): array
     {
-        $base = trim((string) (self::settings()['stock_base_domain'] ?? ''));
-        if ($base === '' && function_exists('portalEnv')) {
-            $base = trim((string) portalEnv('PORTAL_DOMAIN', ''));
+        $out = [];
+        $add = static function (string $domain) use (&$out): void {
+            $domain = self::normalizeHost($domain);
+            if ($domain !== '' && self::isValidDomain($domain) && !in_array($domain, $out, true)) {
+                $out[] = $domain;
+            }
+        };
+        $lines = preg_split('/\r\n|\r|\n/', (string) (self::settings()['stock_base_domains'] ?? '')) ?: [];
+        foreach ($lines as $line) {
+            $add((string) $line);
         }
-        if ($base === '') {
-            $base = self::normalizeHost((string) ($_SERVER['HTTP_HOST'] ?? ''));
+        $add((string) (self::settings()['stock_base_domain'] ?? ''));
+        if ($out === []) {
+            $base = '';
+            if (function_exists('portalEnv')) {
+                $base = trim((string) portalEnv('PORTAL_DOMAIN', ''));
+            }
+            if ($base === '') {
+                $base = self::normalizeHost((string) ($_SERVER['HTTP_HOST'] ?? ''));
+            }
+            $add($base);
         }
-        return self::normalizeHost($base);
+        return $out;
     }
 
-    /** The stock login host for a reseller, e.g. acme.pbx.ownpbx.org ('' when no base is known). */
-    public static function stockHost(string $subdomain): string
+    /** The effective global base: the first offered domain ('' when none is known). */
+    public static function stockBaseDomain(): string
+    {
+        return self::stockBaseDomains()[0] ?? '';
+    }
+
+    /**
+     * The base a reseller's stock address uses: the base stored on their row,
+     * or the effective global base when none was stored (rows created before
+     * the per-reseller base existed). A stored base that left the offered list
+     * still counts — removing a domain only stops offering it to new resellers.
+     */
+    public static function stockBaseForRow(array $row): string
+    {
+        $stored = self::normalizeHost((string) ($row['stock_base_domain'] ?? ''));
+        if ($stored !== '' && self::isValidDomain($stored)) {
+            return $stored;
+        }
+        return self::stockBaseDomain();
+    }
+
+    /**
+     * The stock login host for a reseller, e.g. acme.pbx.ownpbx.org ('' when no
+     * subdomain or no base is known). $base overrides the effective global base.
+     */
+    public static function stockHost(string $subdomain, ?string $base = null): string
     {
         $subdomain = strtolower(trim($subdomain));
-        $base = self::stockBaseDomain();
+        $base = $base ?? self::stockBaseDomain();
         if ($subdomain === '' || $base === '') {
             return '';
         }
         return $subdomain . '.' . $base;
+    }
+
+    /** The stock login host for one reseller row (stored base, else legacy base). */
+    public static function stockHostForRow(array $row): string
+    {
+        return self::stockHost((string) ($row['stock_subdomain'] ?? ''), self::stockBaseForRow($row));
     }
 
     /**
@@ -387,12 +486,17 @@ final class Reseller
             if ($row !== false) {
                 return $row;
             }
-            $base = self::stockBaseDomain();
-            if ($base !== '' && str_ends_with($host, '.' . $base)) {
-                $sub = substr($host, 0, -strlen('.' . $base));
-                if ($sub !== '' && !str_contains($sub, '.')) {
+            // Stock host: <subdomain>.<base>, where <base> is the base stored
+            // on the reseller's row (or the effective global base when none was
+            // stored). Splitting at the first dot means a stored base keeps
+            // resolving even after it leaves the offered list.
+            $dot = strpos($host, '.');
+            if ($dot !== false) {
+                $sub = substr($host, 0, $dot);
+                $base = substr($host, $dot + 1);
+                if ($sub !== '' && $base !== '') {
                     $row = self::getBySubdomain($sub);
-                    if ($row !== null && $row['status'] === 'active') {
+                    if ($row !== null && $row['status'] === 'active' && self::stockBaseForRow($row) === $base) {
                         return $row;
                     }
                 }
