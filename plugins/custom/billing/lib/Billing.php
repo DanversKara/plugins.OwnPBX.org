@@ -33,6 +33,46 @@ final class Billing
         'faxes' => ['Faxes sent', 'monthly'],
     ];
 
+    /**
+     * Module (billing role) features, Layer 1: module key => [plan column, label].
+     * A plan flag unlocks the module for its subscribers (their own records
+     * only — the core's BillingRoleBridge enforces the scoping). Labels match
+     * RoleRepository::modulesDefinition(). The column names double as the
+     * per-user exception feature in plg_billing_overrides.
+     */
+    public const MODULE_FEATURES = [
+        'time_conditions' => ['feat_time_conditions', 'Time Conditions'],
+        'ivrs' => ['feat_ivrs', 'IVR Menus'],
+        'queues' => ['feat_queues', 'Queues'],
+        'conferences' => ['feat_conferences', 'Conference Rooms'],
+        'meetings' => ['feat_meetings', 'Video Meetings'],
+        'boss_secretary' => ['feat_boss_secretary', 'Boss - Secretary'],
+        'ring_groups' => ['feat_ring_groups', 'Ring Groups'],
+    ];
+
+    /** @var bool|null */
+    private static ?bool $hasPlanFeatureColumns = null;
+
+    /**
+     * Do the plan rows carry the feature flags (core 1.75.61 migration, or a
+     * fresh install from schema.sql)? A plugin copy on an older core has no
+     * feat_* / role_key columns — those writes are a safe no-op there and the
+     * flags read as 0, exactly like the Reseller plugin's stock-base column.
+     */
+    public static function hasPlanFeatureColumns(): bool
+    {
+        if (self::$hasPlanFeatureColumns !== null) {
+            return self::$hasPlanFeatureColumns;
+        }
+        try {
+            $stmt = getDB()->query("SHOW COLUMNS FROM plg_billing_plans LIKE 'feat_queues'");
+            self::$hasPlanFeatureColumns = $stmt !== false && $stmt->fetch() !== false;
+        } catch (\Throwable $e) {
+            self::$hasPlanFeatureColumns = false;
+        }
+        return self::$hasPlanFeatureColumns;
+    }
+
     /** @var array<string, string>|null */
     private static ?array $settings = null;
 
@@ -145,6 +185,71 @@ final class Billing
             $n = (int) ($values['faxes'] ?? 0);
             $out[] = $n === self::UNLIMITED ? 'Unlimited faxes' : ($n > 0 ? sprintf('Fax (%s / month)', number_format($n)) : 'Fax (receive only)');
         }
+        // Billing roles (Layer 1): the modules this plan unlocks for its
+        // subscribers. A missing column (older core) reads as off.
+        foreach (self::MODULE_FEATURES as [$col, $label]) {
+            if (!empty($values[$col])) {
+                $out[] = $label;
+            }
+        }
+        return $out;
+    }
+
+    /** The modules a plan unlocks (module key => 0/1). Missing columns read as 0. */
+    public static function planFeatures(int $planId): array
+    {
+        $plan = self::plan($planId);
+        $out = [];
+        foreach (self::MODULE_FEATURES as $module => [$col]) {
+            $out[$module] = $plan !== null && !empty($plan[$col]) ? 1 : 0;
+        }
+        return $out;
+    }
+
+    /**
+     * The modules the user's ACTIVE subscription unlocks (billing roles,
+     * Layer 1). Empty when there is no active plan, the plan is tied to
+     * another role, or the plugin has no feature columns yet (older core).
+     * A per-user exception for a feat_* feature wins over the plan, same as
+     * for quantities — but an exception alone, without an active plan, grants
+     * nothing: no plan = no flags = locked again.
+     * Lapsed = no customer row, no plan, or a status outside ACTIVE
+     * (canceled, unpaid, incomplete, ...). A subscription cancelled at period
+     * end keeps its status (active) until the period ends, so its modules
+     * stay until then.
+     */
+    public static function userPlanFeatures(int $userId): array
+    {
+        $plan = self::activePlanOf($userId);
+        if ($plan === null) {
+            return [];
+        }
+        // Plan doc §2.2: a billing role = a plan + a role. role_key NULL (or
+        // empty) means the plan is for any role — the default.
+        $roleKey = trim((string) ($plan['role_key'] ?? ''));
+        if ($roleKey !== '') {
+            $q = getDB()->prepare('SELECT role FROM sys_users WHERE id = ?');
+            $q->execute([$userId]);
+            if ((string) $q->fetchColumn() !== $roleKey) {
+                return [];
+            }
+        }
+        $ov = getDB()->prepare('SELECT feature, value FROM plg_billing_overrides WHERE user_id = ?');
+        $ov->execute([$userId]);
+        $overrides = [];
+        foreach ($ov->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $overrides[(string) $row['feature']] = (int) $row['value'];
+        }
+        $out = [];
+        foreach (self::MODULE_FEATURES as $module => [$col]) {
+            $v = !empty($plan[$col]) ? 1 : 0;
+            if (array_key_exists($col, $overrides)) {
+                $v = $overrides[$col] !== 0 ? 1 : 0;
+            }
+            if ($v === 1) {
+                $out[] = $module;
+            }
+        }
         return $out;
     }
 
@@ -172,6 +277,16 @@ final class Billing
             'in_store' => empty($in['in_store']) ? 0 : 1,
             'sort_order' => (int) ($in['sort_order'] ?? 0),
         ];
+        // Billing roles (Layer 1): the feature flags and the optional role
+        // tie. On a core without the 1.75.61 migration the columns do not
+        // exist yet, so they are left out instead of breaking the save.
+        if (self::hasPlanFeatureColumns()) {
+            foreach (self::MODULE_FEATURES as [$col]) {
+                $row[$col] = empty($in[$col]) ? 0 : 1;
+            }
+            $roleKey = trim((string) ($in['role_key'] ?? ''));
+            $row['role_key'] = $roleKey === '' ? null : mb_substr($roleKey, 0, 64);
+        }
         $db = getDB();
         $id = (int) ($in['plan_id'] ?? 0);
         if ($id > 0) {
@@ -346,7 +461,10 @@ final class Billing
 
     public static function setOverride(int $userId, string $feature, ?int $value): void
     {
-        if (!isset(self::FEATURES[$feature])) {
+        // Quantities (FEATURES) and module flags (feat_* columns) are both
+        // exception-able; anything else is a typo.
+        $moduleCols = array_column(self::MODULE_FEATURES, 0);
+        if (!isset(self::FEATURES[$feature]) && !in_array($feature, $moduleCols, true)) {
             throw new \InvalidArgumentException('Unknown feature.');
         }
         if ($value === null) {

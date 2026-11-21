@@ -11,6 +11,16 @@ CREATE TABLE IF NOT EXISTS plg_billing_plans (
     messages INT NOT NULL DEFAULT 0,
     fax TINYINT(1) NOT NULL DEFAULT 0,
     faxes INT NOT NULL DEFAULT 0,
+    -- Billing roles (Layer 1): one flag per unlockable module, plus the
+    -- optional role the plan is tied to (NULL = any role).
+    feat_time_conditions TINYINT(1) NOT NULL DEFAULT 0,
+    feat_ivrs TINYINT(1) NOT NULL DEFAULT 0,
+    feat_queues TINYINT(1) NOT NULL DEFAULT 0,
+    feat_conferences TINYINT(1) NOT NULL DEFAULT 0,
+    feat_meetings TINYINT(1) NOT NULL DEFAULT 0,
+    feat_boss_secretary TINYINT(1) NOT NULL DEFAULT 0,
+    feat_ring_groups TINYINT(1) NOT NULL DEFAULT 0,
+    role_key VARCHAR(64) NULL DEFAULT NULL,
     is_active TINYINT(1) NOT NULL DEFAULT 1,
     in_store TINYINT(1) NOT NULL DEFAULT 1,
     sort_order INT NOT NULL DEFAULT 0,
@@ -61,9 +71,10 @@ CREATE TABLE IF NOT EXISTS plg_billing_usage (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Per-user exceptions set by the admin; they win over the plan and the defaults.
+-- feature is 32 wide so the feat_* module flags fit ('feat_time_conditions' is 21).
 CREATE TABLE IF NOT EXISTS plg_billing_overrides (
     user_id INT NOT NULL,
-    feature VARCHAR(20) NOT NULL,
+    feature VARCHAR(32) NOT NULL,
     value INT NOT NULL,
     PRIMARY KEY (user_id, feature)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

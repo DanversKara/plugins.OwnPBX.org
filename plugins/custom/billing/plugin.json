@@ -5,7 +5,7 @@
         "en": "Billing & Store (Stripe)",
         "tr": "Faturalama ve Mağaza (Stripe)"
     },
-    "version": "1.0.1",
+    "version": "1.0.2",
     "requires_aipbx": "1.74.0",
     "author": "OwnPBX",
     "author_url": "https://github.com/DanversKara/OwnPBX.org/tree/main/plugins/billing",
@@ -13,9 +13,9 @@
     "category": "integration",
     "icon": "fas fa-credit-card",
     "icon_style": "color: #635bff;",
-    "description": "Monthly plans through Stripe that set what each user gets: outside call minutes, text messages and fax. Users subscribe, switch and cancel themselves; a public Store takes sign-ups that wait for your approval before anyone is charged. Limits can be watched before they are enforced.",
+    "description": "Monthly plans through Stripe that set what each user gets: outside call minutes, text messages and fax. Plans can also unlock PBX features per user — time conditions, IVR menus, queues, conference rooms, video meetings, boss-secretary and ring groups — each user seeing only their own records. Users subscribe, switch and cancel themselves; a public Store takes sign-ups that wait for your approval before anyone is charged. Limits can be watched before they are enforced.",
     "description_i18n": {
-        "en": "Monthly plans through Stripe that set what each user gets: outside call minutes, text messages and fax. Users subscribe, switch and cancel themselves; a public Store takes sign-ups that wait for your approval before anyone is charged. Limits can be watched before they are enforced."
+        "en": "Monthly plans through Stripe that set what each user gets: outside call minutes, text messages and fax. Plans can also unlock PBX features per user — time conditions, IVR menus, queues, conference rooms, video meetings, boss-secretary and ring groups — each user seeing only their own records. Users subscribe, switch and cancel themselves; a public Store takes sign-ups that wait for your approval before anyone is charged. Limits can be watched before they are enforced."
     },
     "tables": [
         "plg_billing_plans",

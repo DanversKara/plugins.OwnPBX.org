@@ -15,6 +15,21 @@ $planName = array_column($plans, 'name', 'id');
 $limit = static function (int $v, string $unit = ''): string {
     return $v === Billing::UNLIMITED ? 'Unlimited' : ($v === 0 ? 'None' : number_format($v) . $unit);
 };
+// Billing roles (Layer 1): what a plan unlocks, and for which role (if tied).
+$planFeatures = static function (array $p): string {
+    $names = [];
+    foreach (Billing::planFeatures((int) $p['id']) as $m => $v) {
+        if ($v) {
+            $names[] = Billing::MODULE_FEATURES[$m][1];
+        }
+    }
+    $s = $names !== [] ? implode(', ', $names) : '—';
+    if (!empty($p['role_key'])) {
+        $s .= ' · role: ' . $p['role_key'];
+    }
+    return $s;
+};
+$roles = getDB()->query('SELECT role_key, role_name FROM sys_roles ORDER BY role_name, role_key')->fetchAll(PDO::FETCH_ASSOC);
 $users = getDB()->query("SELECT u.id, u.username, u.full_name, u.extension, u.role, COALESCE(u.is_guest, 0) AS is_guest,
         c.status, c.plan_id, c.current_period_end, c.cancel_at_period_end, c.stripe_customer_id, COALESCE(c.guest_may_upgrade, 0) AS guest_may_upgrade
     FROM sys_users u LEFT JOIN plg_billing_customers c ON c.user_id = u.id
@@ -50,8 +65,8 @@ foreach (getDB()->query('SELECT user_id, feature, value FROM plg_billing_overrid
     <div class="card-header"><div class="card-title"><i class="fas fa-layer-group"></i> Plans</div></div>
     <div class="u-p-16">
         <p class="u-hint">-1 = unlimited, 0 = none. Changing a price makes a new Stripe price when you publish; current subscribers keep the old price until they switch. Limits apply to subscribers at once.</p>
-        <?php echo uiTableOpen(['Plan', 'Price / month', 'Minutes', 'Texts', 'Fax', 'Store', 'Stripe', ''], ['search' => false]); ?>
-        <?php if ($plans === []): echo uiTableEmptyRow(8, 'No plans yet.'); endif; ?>
+        <?php echo uiTableOpen(['Plan', 'Price / month', 'Minutes', 'Texts', 'Fax', 'Features', 'Store', 'Stripe', ''], ['search' => false]); ?>
+        <?php if ($plans === []): echo uiTableEmptyRow(9, 'No plans yet.'); endif; ?>
         <?php foreach ($plans as $p): ?>
             <tr>
                 <td><strong><?php echo $h($p['name']); ?></strong><?php echo empty($p['is_active']) ? ' <span class="badge badge-secondary">hidden</span>' : ''; ?><div class="u-hint"><?php echo $h($p['description']); ?></div></td>
@@ -59,6 +74,7 @@ foreach (getDB()->query('SELECT user_id, feature, value FROM plg_billing_overrid
                 <td><?php echo $h($limit((int) $p['call_minutes'])); ?></td>
                 <td><?php echo $h($limit((int) $p['messages'])); ?></td>
                 <td><?php echo empty($p['fax']) ? 'No' : $h($limit((int) $p['faxes'], ' / mo')); ?></td>
+                <td><?php echo $h($planFeatures($p)); ?></td>
                 <td><?php echo empty($p['in_store']) ? 'No' : 'Yes'; ?></td>
                 <td><?php echo $p['stripe_price_id'] !== '' && $p['stripe_mode'] === $mode ? '<span class="badge badge-success">published</span>' : '<span class="badge badge-secondary">not published</span>'; ?></td>
                 <td class="u-nowrap">
@@ -87,6 +103,18 @@ foreach (getDB()->query('SELECT user_id, feature, value FROM plg_billing_overrid
                 <div class="form-group"><label class="form-label">Order</label><input type="number" name="sort_order" class="form-control" value="0"></div>
             </div>
             <label class="u-d-flex u-ai-center u-gap-8"><input type="checkbox" name="fax" value="1"> Fax included</label>
+            <?php if (Billing::hasPlanFeatureColumns()): ?>
+            <h4 class="u-mt-20">Features this plan unlocks</h4>
+            <p class="u-hint">A subscriber on this plan may open these pages and manage only their own records there. When the subscription lapses, is cancelled, or the payment fails past grace, they lock again. A role below ties the plan to that role only — "Any role" means every subscriber on the plan gets them.</p>
+            <?php foreach (Billing::MODULE_FEATURES as $m => [$col, $label]): ?>
+            <label class="u-d-flex u-ai-center u-gap-8"><input type="checkbox" name="<?php echo $h($col); ?>" value="1"> <?php echo $h($label); ?></label>
+            <?php endforeach; ?>
+            <div class="form-group u-mt-10"><label class="form-label">Only for this role</label>
+                <select name="role_key" class="form-control"><option value="">Any role</option>
+                    <?php foreach ($roles as $r): ?><option value="<?php echo $h($r['role_key']); ?>"><?php echo $h($r['role_name'] ?: $r['role_key']); ?></option><?php endforeach; ?></select></div>
+            <?php else: ?>
+            <p class="u-hint">Feature flags need core 1.75.61 or newer — this core does not have the plan flag columns yet, so plans sell quantities only for now.</p>
+            <?php endif; ?>
             <label class="u-d-flex u-ai-center u-gap-8"><input type="checkbox" name="is_active" value="1" checked> Offered to users</label>
             <label class="u-d-flex u-ai-center u-gap-8"><input type="checkbox" name="in_store" value="1" checked> Offered in the Store</label>
             <?php if ($mode !== ''): ?><label class="u-d-flex u-ai-center u-gap-8"><input type="checkbox" name="publish" value="1" checked> Publish to Stripe now</label><?php endif; ?>
@@ -100,7 +128,7 @@ foreach (getDB()->query('SELECT user_id, feature, value FROM plg_billing_overrid
     <div class="card-header"><div class="card-title"><i class="fas fa-users"></i> Users this month</div></div>
     <div class="u-p-16">
         <p class="u-hint">Used / allowed this calendar month. An exception (set below) wins over the plan and the defaults; admins are never limited.</p>
-        <?php echo uiTableOpen(['User', 'Plan', 'Minutes', 'Texts', 'Faxes', ''], ['search' => true]); ?>
+        <?php echo uiTableOpen(['User', 'Plan', 'Features', 'Minutes', 'Texts', 'Faxes', ''], ['search' => true]); ?>
         <?php foreach ($users as $u):
             $uid = (int) $u['id'];
             $active = in_array((string) $u['status'], Billing::ACTIVE, true);
@@ -109,12 +137,17 @@ foreach (getDB()->query('SELECT user_id, feature, value FROM plg_billing_overrid
                 $q = Billing::quota($uid, $f);
                 return number_format($used) . ' / ' . $limit($q) . (isset($overrides[$uid][$f]) ? ' <span class="badge badge-info" title="exception">exc.</span>' : '');
             };
+            $mods = [];
+            foreach (Billing::userPlanFeatures($uid) as $m) {
+                $mods[] = Billing::MODULE_FEATURES[$m][1];
+            }
         ?>
             <tr>
                 <td><strong><?php echo $h($u['full_name'] ?: $u['username']); ?></strong> <?php echo $h($u['extension']); ?>
                     <?php echo $u['role'] === 'admin' ? ' <span class="badge badge-primary">admin</span>' : ''; ?>
                     <?php echo !empty($u['is_guest']) && $u['role'] !== 'admin' ? ' <span class="badge badge-warning">guest</span>' : ''; ?></td>
                 <td><?php echo $active ? $h($planName[(int) $u['plan_id']] ?? '?') . ' <span class="u-hint">' . $h($u['status']) . ($u['cancel_at_period_end'] ? ', ends ' . date('Y-m-d', (int) $u['current_period_end']) : '') . '</span>' : '<span class="u-hint">no plan</span>'; ?></td>
+                <td><?php echo $h($mods !== [] ? implode(', ', $mods) : '—'); ?></td>
                 <td><?php echo $cell('call_minutes'); ?></td>
                 <td><?php echo $cell('messages'); ?></td>
                 <td><?php echo Billing::quota($uid, 'fax') === 1 ? $cell('faxes') : 'No fax'; ?></td>
@@ -144,6 +177,7 @@ foreach (getDB()->query('SELECT user_id, feature, value FROM plg_billing_overrid
             </select>
             <select name="feature" class="form-control">
                 <?php foreach (Billing::FEATURES as $f => [$label, $kind]): ?><option value="<?php echo $h($f); ?>"><?php echo $h($label . ($kind === 'bool' ? ' (1 = on, 0 = off)' : '')); ?></option><?php endforeach; ?>
+                <?php foreach (Billing::MODULE_FEATURES as $m => [$col, $label]): ?><option value="<?php echo $h($col); ?>"><?php echo $h($label . ' (1 = on, 0 = off)'); ?></option><?php endforeach; ?>
             </select>
             <input type="number" name="value" class="form-control" min="-1" placeholder="-1 unlimited · empty = remove">
             <button type="submit" class="btn btn-secondary"><i class="fas fa-user-cog"></i> Save</button>
