@@ -35,10 +35,22 @@ final class Invites
         return dirname((string) (new \ReflectionFunction('getDB'))->getFileName()) . '/src';
     }
 
+    /**
+     * The portal's own address, for invite links. Same precedence as the core's
+     * ForgotPasswordService::portalUrl(): the configured portal domain, then the
+     * system setting, then the server's own address — NEVER the request's Host
+     * header, which an attacker can set and get mailed out in invite links.
+     */
     public static function portalUrl(): string
     {
-        $host = function_exists('portalEnv') ? trim((string) portalEnv('PORTAL_DOMAIN', '')) : '';
-        return 'https://' . ($host !== '' ? $host : (string) ($_SERVER['HTTP_HOST'] ?? 'localhost'));
+        $domain = function_exists('portalEnv') ? trim((string) portalEnv('PORTAL_DOMAIN', '')) : '';
+        if ($domain === '') {
+            $domain = function_exists('getSystemSetting') ? trim((string) getSystemSetting('pjsip_external_domain', '')) : '';
+        }
+        if ($domain === '' || !preg_match('/^[A-Za-z0-9.-]+(:\d+)?$/', $domain)) {
+            $domain = preg_replace('/[^A-Za-z0-9.:-]/', '', (string) ($_SERVER['SERVER_ADDR'] ?? 'localhost'));
+        }
+        return 'https://' . $domain;
     }
 
     public static function url(string $token): string
