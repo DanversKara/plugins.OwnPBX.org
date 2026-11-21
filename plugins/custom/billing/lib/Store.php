@@ -21,6 +21,7 @@ final class BillingStore
     public const STATUS = [
         'started' => ['Card not entered', 'secondary'],
         'awaiting' => ['Awaiting approval', 'warning'],
+        'approving' => ['Being approved', 'info'],
         'approved' => ['Approved', 'success'],
         'rejected' => ['Rejected', 'danger'],
         'failed' => ['Payment failed', 'danger'],
@@ -159,7 +160,7 @@ final class BillingStore
             ->execute(['started', $name, $email, (int) $plan['id'], $number, Billing::mode(), mb_substr($ip, 0, 45)]);
         $orderId = (int) $db->lastInsertId();
         $st = Billing::stripe();
-        $cus = $st->post('/v1/customers', ['name' => $name, 'email' => $email, 'metadata' => ['pbx_store_order' => $orderId]]);
+        $cus = $st->post('/v1/customers', ['name' => $name, 'email' => $email, 'metadata' => ['pbx_store_order' => $orderId]], "pbx-store-order-{$orderId}-customer");
         $session = $st->post('/v1/checkout/sessions', [
             'mode' => 'setup',
             'customer' => (string) $cus['id'],
@@ -169,7 +170,7 @@ final class BillingStore
             'setup_intent_data' => ['metadata' => ['pbx_store_order' => $orderId]],
             'success_url' => self::url() . '/thanks?order=' . $orderId,
             'cancel_url' => self::url(),
-        ]);
+        ], "pbx-store-order-{$orderId}-session");
         $db->prepare('UPDATE plg_billing_orders SET stripe_customer_id = ?, stripe_session_id = ?, updated_at = NOW() WHERE id = ?')
             ->execute([(string) $cus['id'], (string) $session['id'], $orderId]);
         return (string) $session['url'];
@@ -223,7 +224,11 @@ final class BillingStore
 
     /**
      * Approve: charge the first month on the saved card, then create the account and route the
-     * number. A declined card stops before anything is created.
+     * number. A declined card stops before anything is created. The order is claimed
+     * atomically (status awaiting -> approving) before any Stripe call, so two approves of
+     * the same order cannot both charge. Two approves of DIFFERENT orders can still pick
+     * the same free extension (nextFreeExtension has no reservation): the second fails at
+     * saveUser and its own subscription is refunded via undoCharge.
      * @return string what happened, for the admin
      */
     public static function approve(int $orderId): string
@@ -242,6 +247,16 @@ final class BillingStore
         $ext = self::nextFreeExtension();
         if ($o['number'] !== '' && !self::numberFreeIgnoring((string) $o['number'], $orderId)) {
             throw new \InvalidArgumentException("The number {$o['number']} is now answered by something else. Reject the order or free the number.");
+        }
+        // Claim the order atomically BEFORE any Stripe call: two approves of the same order
+        // at the same time cannot both proceed — the loser sees 0 rows and stops.
+        // 'approving' is a visible stuck state on purpose: if anything fails unexpectedly
+        // after the claim, the order stays there for the admin to check against Stripe
+        // instead of silently going back to 'awaiting' and inviting a second approve.
+        $claim = getDB()->prepare("UPDATE plg_billing_orders SET status = 'approving', updated_at = NOW() WHERE id = ? AND status = 'awaiting'");
+        $claim->execute([$orderId]);
+        if ($claim->rowCount() !== 1) {
+            throw new \InvalidArgumentException('That order is not waiting for approval.');
         }
         $st = Billing::stripe();
         if ($o['payment_method'] !== '') {
@@ -331,12 +346,14 @@ final class BillingStore
     {
         try {
             $st = Billing::stripe();
-            $st->request('DELETE', '/v1/subscriptions/' . $sub['id']);
+            $orderId = (int) ($sub['metadata']['pbx_store_order'] ?? 0);
+            $key = $orderId > 0 ? "pbx-store-order-{$orderId}-undo" : 'pbx-store-sub-' . (string) ($sub['id'] ?? '');
+            $st->request('DELETE', '/v1/subscriptions/' . $sub['id'], [], $key . '-cancel');
             $inv = (string) ($sub['latest_invoice'] ?? '');
             if ($inv !== '') {
                 $invoice = $st->get('/v1/invoices/' . $inv);
                 if (!empty($invoice['charge'])) {
-                    $st->post('/v1/refunds', ['charge' => $invoice['charge']]);
+                    $st->post('/v1/refunds', ['charge' => $invoice['charge']], $key . '-refund');
                 }
             }
         } catch (\Throwable $e) {

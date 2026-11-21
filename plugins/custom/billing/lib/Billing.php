@@ -131,8 +131,18 @@ final class Billing
 
     public static function baseUrl(): string
     {
+        // Same precedence as core ForgotPasswordService::portalUrl(): the
+        // configured portal domain first, then the PBX's external domain
+        // setting, then this server's own address. Never the request Host
+        // header — it is attacker-controlled (Host-header poisoning).
         $host = function_exists('portalEnv') ? trim((string) portalEnv('PORTAL_DOMAIN', '')) : '';
-        return 'https://' . ($host !== '' ? $host : (string) ($_SERVER['HTTP_HOST'] ?? 'localhost'));
+        if ($host === '' && function_exists('getSystemSetting')) {
+            $host = trim((string) getSystemSetting('pjsip_external_domain', ''));
+        }
+        if ($host === '' || !preg_match('/^[A-Za-z0-9.-]+(:\d+)?$/', $host)) {
+            $host = preg_replace('/[^A-Za-z0-9.:-]/', '', (string) ($_SERVER['SERVER_ADDR'] ?? 'localhost'));
+        }
+        return 'https://' . $host;
     }
 
     public static function money(int $cents, string $currency = ''): string
@@ -343,7 +353,7 @@ final class Billing
             $new = $st->post('/v1/prices', [
                 'product' => $product, 'unit_amount' => (int) $plan['price_cents'], 'currency' => $plan['currency'],
                 'recurring' => ['interval' => 'month'], 'metadata' => ['pbx_plan_id' => $id],
-            ]);
+            ], "pbx-plan-{$id}-price-{$mode}-{$plan['price_cents']}");
             if ($price !== '') {
                 $st->post("/v1/prices/{$price}", ['active' => false]);
             }
@@ -428,6 +438,62 @@ final class Billing
         }
         getDB()->prepare('INSERT INTO plg_billing_usage (user_id, feature, amount, detail) VALUES (?, ?, ?, ?)')
             ->execute([$userId, $feature, $amount, mb_substr($detail, 0, 120)]);
+    }
+
+    /**
+     * Reserves quota for one use of a monthly feature (texts, faxes) as ONE statement: the
+     * quota check and the usage insert happen together, so two sends at the same time cannot
+     * both pass the check and then both count. Returns the usage row id reserved, or 0 when
+     * the quota is used up (callers treat 0 as "not allowed").
+     *
+     * Limits off (or the plugin disabled): nobody is stopped, but the use is still counted,
+     * exactly like allows() + record() did. Unlimited quotas insert plainly. The faxes
+     * feature also needs the fax switch on. Call minutes have no reserve: the gate is at
+     * dial time and the count at hangup, in different requests, with the Dial() L() cap as
+     * the bound — see callAllowance().
+     *
+     * One statement is not a serializable lock: under InnoDB REPEATABLE READ the range
+     * scan behind the SUM takes shared next-key locks on the user's month slice of
+     * idx_user_feature, so a second reserve for the same user and feature waits for the
+     * first to commit instead of both reading the same total. A failed send should give
+     * its reservation back with releaseReservation(), so only sends that went out count.
+     */
+    public static function reserve(int $userId, string $feature, int $amount = 1, string $detail = ''): int
+    {
+        if ($userId <= 0 || $amount <= 0 || !isset(self::FEATURES[$feature]) || self::FEATURES[$feature][1] !== 'monthly') {
+            return 0;
+        }
+        if (!self::enabled() || !self::enforcing()) {
+            self::record($userId, $feature, $amount, $detail);
+            return (int) getDB()->lastInsertId();
+        }
+        if ($feature === 'faxes' && self::quota($userId, 'fax') !== 1) {
+            return 0;
+        }
+        $q = self::quota($userId, $feature);
+        if ($q === self::UNLIMITED) {
+            self::record($userId, $feature, $amount, $detail);
+            return (int) getDB()->lastInsertId();
+        }
+        if ($q <= 0) {
+            return 0;
+        }
+        $start = date('Y-m-01 00:00:00');
+        $stmt = getDB()->prepare('INSERT INTO plg_billing_usage (user_id, feature, amount, detail, created_at)
+            SELECT ?, ?, ?, ?, NOW() FROM
+            (SELECT COALESCE(SUM(amount), 0) AS used FROM plg_billing_usage WHERE user_id = ? AND feature = ? AND created_at >= ?) AS u
+            WHERE u.used + ? <= ?');
+        $stmt->execute([$userId, $feature, $amount, mb_substr($detail, 0, 120), $userId, $feature, $start, $amount, $q]);
+        return $stmt->rowCount() === 1 ? (int) getDB()->lastInsertId() : 0;
+    }
+
+    /** Gives back a reservation (e.g. the provider refused the send): only sends that went out count. */
+    public static function releaseReservation(int $usageId): void
+    {
+        if ($usageId <= 0) {
+            return;
+        }
+        getDB()->prepare('DELETE FROM plg_billing_usage WHERE id = ?')->execute([$usageId]);
     }
 
     /**
@@ -575,6 +641,19 @@ final class Billing
         if (self::guestUpgradeBlocked($userId)) {
             throw new \InvalidArgumentException('Your account cannot change plans without contacting support first.');
         }
+        // A second subscribe would start a second live Stripe subscription that nothing shows
+        // and nobody can see, while it still charges: an active subscriber switches instead.
+        $row = self::customer($userId);
+        if ($row !== null && in_array($row['status'], self::ACTIVE, true)) {
+            throw new \InvalidArgumentException('You already have an active plan. Switch plans or cancel it instead of subscribing again.');
+        }
+        // Re-check the live Stripe price against the stored one, the same comparison
+        // publishPlan() makes: a price edited but not yet published must never be charged.
+        $live = self::stripe()->get('/v1/prices/' . $plan['stripe_price_id']);
+        if ((int) ($live['unit_amount'] ?? -1) !== (int) $plan['price_cents'] || ($live['currency'] ?? '') !== $plan['currency'] || empty($live['active'])) {
+            throw new \InvalidArgumentException('That plan\'s price changed and has not been published yet. Ask an administrator to publish the plan.');
+        }
+        $mode = self::mode();
         $session = self::stripe()->post('/v1/checkout/sessions', [
             'mode' => 'subscription',
             'customer' => self::stripeCustomerFor($userId),
@@ -584,7 +663,7 @@ final class Billing
             'subscription_data' => ['metadata' => ['pbx_user_id' => $userId]],
             'success_url' => self::baseUrl() . '/apps/billing?done=1',
             'cancel_url' => self::baseUrl() . '/apps/billing',
-        ]);
+        ], "pbx-user-{$userId}-checkout-{$planId}-{$mode}");
         return (string) $session['url'];
     }
 
@@ -598,6 +677,9 @@ final class Billing
         }
         if ($plan === null || empty($plan['is_active']) || $plan['stripe_price_id'] === '' || $plan['stripe_mode'] !== self::mode()) {
             throw new \InvalidArgumentException('That plan is not available.');
+        }
+        if (self::guestUpgradeBlocked($userId)) {
+            throw new \InvalidArgumentException('Your account cannot change plans without contacting support first.');
         }
         $sub = self::stripe()->post('/v1/subscriptions/' . $row['subscription_id'], [
             'items' => [['id' => $row['subscription_item_id'], 'price' => $plan['stripe_price_id']]],
@@ -684,9 +766,15 @@ final class Billing
     {
         $id = (string) ($event['id'] ?? '');
         $type = (string) ($event['type'] ?? '');
-        $seen = getDB()->prepare('SELECT 1 FROM plg_billing_events WHERE id = ?');
-        $seen->execute([$id]);
-        if ($id === '' || $seen->fetchColumn()) {
+        if ($id === '') {
+            return true;
+        }
+        // Claim the event FIRST, then process: two deliveries of the same event at the
+        // same time cannot both get past this — the loser sees 0 rows and skips. The
+        // claim is given back below when processing fails, so Stripe's retry still runs.
+        $claim = getDB()->prepare('INSERT IGNORE INTO plg_billing_events (id, type) VALUES (?, ?)');
+        $claim->execute([$id, mb_substr($type, 0, 80)]);
+        if ($claim->rowCount() === 0) {
             return true;
         }
         $obj = (array) ($event['data']['object'] ?? []);
@@ -716,11 +804,15 @@ final class Billing
                     self::syncUser((int) $row['user_id']);
                 }
             }
-        } catch (BillingStripeError $e) {
+        } catch (\Throwable $e) {
+            // Processing failed: give the claim back, so Stripe's retry can run it.
+            getDB()->prepare('DELETE FROM plg_billing_events WHERE id = ?')->execute([$id]);
             error_log('billing webhook: ' . $e->getMessage());
-            return false;
+            if ($e instanceof BillingStripeError) {
+                return false;
+            }
+            throw $e;
         }
-        getDB()->prepare('INSERT IGNORE INTO plg_billing_events (id, type) VALUES (?, ?)')->execute([$id, mb_substr($type, 0, 80)]);
         return true;
     }
 
