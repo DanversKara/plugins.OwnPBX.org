@@ -4,7 +4,7 @@
 -- guest switches and phone modes the new account gets when is_guest = 1.
 CREATE TABLE IF NOT EXISTS plg_invites (
     id INT UNSIGNED NOT NULL AUTO_INCREMENT,
-    token CHAR(32) NOT NULL,
+    token CHAR(64) NOT NULL,
     label VARCHAR(80) NOT NULL DEFAULT '',
     email VARCHAR(120) NOT NULL DEFAULT '',
     max_uses INT UNSIGNED NOT NULL DEFAULT 1,

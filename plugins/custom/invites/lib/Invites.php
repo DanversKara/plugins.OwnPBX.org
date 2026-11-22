@@ -61,7 +61,10 @@ final class Invites
     // --- Administrator side ---
 
     /**
-     * New invite from the admin form. Returns the row (with token and url).
+     * New invite from the admin form. Returns the row, with the one-time link in `url`.
+     * Only the SHA-256 hash of the token is stored (plg_invites.token CHAR(64)): the
+     * link itself is never recoverable from the row, so it is shown once, right
+     * after the invite is made, and e-mailed at once when an address is given.
      * @param array<string, mixed> $in label, email, kind (one|many), max_uses, days, is_guest,
      *                                 guest_* switches, phone_modes[]
      */
@@ -90,11 +93,12 @@ final class Invites
         $token = bin2hex(random_bytes(16));
         getDB()->prepare('INSERT INTO plg_invites (token, label, email, max_uses, expires_at, is_guest, guest_rules, created_by)
             VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? DAY), ?, ?, ?)')
-            ->execute([$token, $label, $email, $maxUses, $days, $isGuest, $isGuest ? (string) json_encode($rules) : '', $adminId]);
+            ->execute([hash('sha256', $token), $label, $email, $maxUses, $days, $isGuest, $isGuest ? (string) json_encode($rules) : '', $adminId]);
         $row = self::byToken($token);
+        $row['url'] = self::url($token);
         self::audit("Invite made: " . self::describe((array) $row));
         if ($email !== '') {
-            self::sendInvite((array) $row);
+            self::sendInvite((array) $row, $token);
         }
         return (array) $row;
     }
@@ -111,7 +115,9 @@ final class Invites
         foreach ($rows as &$r) {
             $r['status'] = self::status($r);
             $r['joined'] = $joined[(int) $r['id']] ?? [];
-            $r['url'] = self::url((string) $r['token']);
+            // No link here: only the token hash is stored, so a link cannot be
+            // rebuilt from a row. It is shown once, when the invite is made.
+            $r['url'] = '';
         }
         return $rows;
     }
@@ -129,6 +135,11 @@ final class Invites
         self::audit("Invite #{$id} deleted");
     }
 
+    /**
+     * Send an open invite again — with a FRESH link. The old link cannot be
+     * re-sent (only its hash is stored), so a new token is made, the old one
+     * stops working, and the new link is e-mailed.
+     */
     public static function resend(int $id): void
     {
         $q = getDB()->prepare('SELECT * FROM plg_invites WHERE id = ?');
@@ -137,7 +148,9 @@ final class Invites
         if (!$row || $row['email'] === '' || self::status($row) !== 'open') {
             throw new \InvalidArgumentException('Only an open one-person invite with an e-mail can be sent again.');
         }
-        self::sendInvite($row);
+        $token = bin2hex(random_bytes(16));
+        getDB()->prepare('UPDATE plg_invites SET token = ? WHERE id = ?')->execute([hash('sha256', $token), $id]);
+        self::sendInvite($row, $token);
     }
 
     /** open | used | expired | withdrawn */
@@ -178,13 +191,18 @@ final class Invites
 
     // --- The invited person ---
 
+    /**
+     * Find an invite by the token from its link. The presented token is
+     * hashed and matched against the stored hash; a database read alone
+     * never yields a working link.
+     */
     public static function byToken(string $token): ?array
     {
         if (!preg_match('/^[a-f0-9]{32}$/', $token)) {
             return null;
         }
         $q = getDB()->prepare('SELECT * FROM plg_invites WHERE token = ?');
-        $q->execute([$token]);
+        $q->execute([hash('sha256', $token)]);
         $r = $q->fetch(PDO::FETCH_ASSOC);
         return $r ?: null;
     }
@@ -395,13 +413,17 @@ final class Invites
         return function_exists('getSystemSetting') ? (string) getSystemSetting('brand_title', 'OwnPBX') : 'OwnPBX';
     }
 
-    public static function sendInvite(array $inv): void
+    /**
+     * E-mail the invite link. The raw token is passed in: the stored value
+     * is only its hash and cannot rebuild the link.
+     */
+    public static function sendInvite(array $inv, string $token): void
     {
         $site = self::siteName();
         $hello = $inv['label'] !== '' ? "Hello {$inv['label']},\n\n" : "Hello,\n\n";
         self::mail((string) $inv['email'], "You are invited to {$site}", $hello
             . "you are invited to an account on {$site}. Open this link to choose your user name and password; "
-            . "you get your own extension right away:\n\n" . self::url((string) $inv['token']) . "\n\n"
+            . "you get your own extension right away:\n\n" . self::url($token) . "\n\n"
             . 'The link works until ' . date('F j, Y', (int) strtotime((string) $inv['expires_at'])) . '.');
     }
 

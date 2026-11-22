@@ -17,12 +17,13 @@ return static function (string $slug, array $settings): array {
             case 'create':
                 $row = Invites::create($_POST, isset($_SESSION['user_id']) ? (int) $_SESSION['user_id'] : null);
                 $_SESSION['invites_new'] = (int) $row['id'];
+                $_SESSION['invites_new_url'] = (string) ($row['url'] ?? '');
                 return ['message' => $row['email'] !== ''
-                    ? 'Invite e-mailed to ' . $row['email'] . '. The link is also in the list below.'
-                    : 'Invite made. Copy its link from the list below.'];
+                    ? 'Invite e-mailed to ' . $row['email'] . '. The link is also shown once in the highlighted row below.'
+                    : 'Invite made. Copy its link from the highlighted row below — it is shown only once.'];
             case 'resend':
                 Invites::resend($id);
-                return ['message' => 'Invite e-mailed again.'];
+                return ['message' => 'A new invite link was e-mailed. The old link no longer works.'];
             case 'revoke':
                 Invites::revoke($id);
                 return ['message' => 'Invite withdrawn: the link no longer works.'];

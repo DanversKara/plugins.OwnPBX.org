@@ -11,7 +11,8 @@ $h = static fn($s): string => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8')
 $csrf = '<input type="hidden" name="csrf_token" value="' . $h($csrf_token) . '">';
 $invites = Invites::all();
 $newId = (int) ($_SESSION['invites_new'] ?? 0);
-unset($_SESSION['invites_new']);
+$newUrl = (string) ($_SESSION['invites_new_url'] ?? '');
+unset($_SESSION['invites_new'], $_SESSION['invites_new_url']);
 $days = max(1, min(90, (int) ($settings['default_days'] ?? 7)));
 $badge = ['open' => 'badge-success', 'used' => 'badge-secondary', 'expired' => 'badge-warning', 'withdrawn' => 'badge-danger'];
 ?>
@@ -88,11 +89,12 @@ $badge = ['open' => 'badge-success', 'used' => 'badge-secondary', 'expired' => '
                 <td class="u-nowrap"><?php echo $h(date('M j, Y H:i', (int) strtotime((string) $i['expires_at']))); ?></td>
                 <td><span class="badge <?php echo $badge[$i['status']] ?? 'badge-secondary'; ?>"><?php echo $h($i['status']); ?></span></td>
                 <td>
-                    <?php if ($open): ?>
+                    <?php if ($open && (int) $i['id'] === $newId && $newUrl !== ''): ?>
                         <div class="u-d-flex u-gap-4">
-                            <input type="text" class="form-control form-control-sm" readonly value="<?php echo $h($i['url']); ?>" onclick="this.select()" style="min-width: 220px">
-                            <button type="button" class="btn btn-secondary btn-sm invite-copy" data-url="<?php echo $h($i['url']); ?>" title="Copy link"><i class="fas fa-copy"></i></button>
+                            <input type="text" class="form-control form-control-sm" readonly value="<?php echo $h($newUrl); ?>" onclick="this.select()" style="min-width: 220px">
+                            <button type="button" class="btn btn-secondary btn-sm invite-copy" data-url="<?php echo $h($newUrl); ?>" title="Copy link"><i class="fas fa-copy"></i></button>
                         </div>
+                    <?php elseif ($open): ?><span class="u-muted">Shown once when made</span>
                     <?php else: ?>—<?php endif; ?>
                 </td>
                 <td class="u-nowrap">
