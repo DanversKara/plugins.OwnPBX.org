@@ -610,7 +610,6 @@ final class Sms
         curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 10, CURLOPT_CONNECTTIMEOUT => 5]);
         $raw = curl_exec($ch);
         $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
         $json = is_string($raw) ? json_decode($raw, true) : null;
         if ($code !== 200 || !is_array($json)) {
             throw new \RuntimeException('GIF search failed (GIPHY answered ' . $code . ').');
@@ -655,7 +654,6 @@ final class Sms
         ]);
         curl_exec($ch);
         $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
         if ($code !== 200 || strlen($data) > self::MAX_MEDIA_BYTES || !str_starts_with($data, 'GIF8')) {
             throw new \RuntimeException('The GIF could not be downloaded (or is larger than 5 MB).');
         }

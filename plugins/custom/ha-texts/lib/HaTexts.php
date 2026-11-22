@@ -232,7 +232,6 @@ final class HaTexts
             CURLOPT_PROXY => '',
         ]);
         $resp = curl_exec($ch);
-        curl_close($ch);
         if (!is_string($resp) || $resp === '') {
             throw new \InvalidArgumentException('chat service not reachable');
         }
