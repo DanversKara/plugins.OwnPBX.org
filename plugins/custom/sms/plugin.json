@@ -5,7 +5,7 @@
         "en": "SMS / MMS",
         "tr": "SMS / MMS"
     },
-    "version": "1.3.4",
+    "version": "1.3.5",
     "requires_aipbx": "1.71.0",
     "author": "OwnPBX",
     "author_url": "https://github.com/DanversKara/OwnPBX.org/tree/main/plugins/sms",

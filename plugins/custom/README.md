@@ -10,7 +10,7 @@ an upstream release can always be compared against our versions.
 | **TV Launcher notifications** | [`launcher`](launcher/) | 1.0.4 | Own | One read-only address a TV launcher, tablet or dashboard polls for what just happened: a call ringing now, new SMS and Chat with the first lines, new voicemail with the first lines of its AI transcript. Token protected. |
 | **Invites** | [`invites`](invites/) | 1.0.0 | Own | Admin-made invite links (single or multi-use) that create an extension/user on the spot; copy link or e-mail it. |
 | **Billing / store** | [`billing`](billing/) | 1.0.1 | Own | Monthly Stripe plans that set each user's outside-call minutes, texts and fax; a public Store whose sign-ups wait for approval; limits can be watched before they are enforced. |
-| **SMS / MMS** | [`sms`](sms/) | 1.3.0 | Modified from upstream `sms` 1.2.2 | Upstream SMS plugin plus: unread badges per number (`user/badge.php`), Edit button for numbers, the provider list defaults to a configured provider, OwnPBX naming. |
+| **SMS / MMS** | [`sms`](sms/) | 1.3.5 | Modified from upstream `sms` 1.2.2 | Upstream SMS plugin plus: unread badges per number (`user/badge.php`), Edit button for numbers, the provider list defaults to a configured provider, OwnPBX naming. An incoming text is also offered to the PBX's emergency command channel (`SmsGuardService`), which the inbound path loads itself — nothing else does on the provider's webhook. |
 
 ## Where they run
 

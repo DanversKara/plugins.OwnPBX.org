@@ -216,6 +216,26 @@ final class Sms
             // A text may be an emergency command for the PBX itself - see SmsGuardService, which
             // answers only a number on its list and only when the message proves who sent it.
             // It is wrapped because a text arriving must never fail on account of this.
+            //
+            // The class is loaded here rather than assumed. There is no autoloader, and the only
+            // thing that required it was worker/tick.php - so the emergency channel worked when a
+            // text arrived through the worker's poll and was silently skipped when the same text
+            // arrived on the provider's webhook, which loads no core services. Whether LOCKDOWN
+            // did anything came down to how your carrier happens to deliver, which is no way to
+            // run the one channel you reach for when you cannot sign in. Resolved through
+            // PluginManager's own location (as the mail template below is) because a plugin
+            // directory may be shadowed under /var/lib and cannot assume where web/ is.
+            if (!class_exists('SmsGuardService')) {
+                try {
+                    $guard = dirname((string) (new \ReflectionClass('PluginManager'))->getFileName(), 2)
+                           . '/services/SmsGuardService.php';
+                    if (is_file($guard)) {
+                        require_once $guard;
+                    }
+                } catch (\Throwable $e) {
+                    error_log('sms guard: could not load SmsGuardService: ' . $e->getMessage());
+                }
+            }
             if (class_exists('SmsGuardService')) {
                 try {
                     $reply = SmsGuardService::handle((string) $m['from'], (string) $m['text']);
